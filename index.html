@@ -228,6 +228,16 @@ textarea{min-height:140px;resize:vertical}
 @media (max-width:860px){.today{grid-template-columns:1fr}}
 @media (max-width:560px){.top .seg button{padding:7px 9px;font-size:.88rem}.hide-s{display:none}}
 .overlay .box p.chest{color:var(--ink);font-weight:600}
+.orb{width:116px;height:116px;margin:6px auto 0;border-radius:50%;display:grid;place-items:center;font-size:3rem;background:var(--gram-soft);box-shadow:0 0 0 0 var(--gram);transition:background .3s}
+.orb.talk{background:var(--agar-soft)}
+.orb.wait{opacity:.6}
+@media (prefers-reduced-motion:no-preference){
+  .orb{animation:breathe 3s ease-in-out infinite}
+  .orb.talk{animation:talk 1s ease-in-out infinite}
+  @keyframes breathe{50%{transform:scale(1.04)}}
+  @keyframes talk{0%{box-shadow:0 0 0 0 rgba(217,178,79,.55)}100%{box-shadow:0 0 0 22px rgba(217,178,79,0)}}
+}
+.chip[aria-pressed]{cursor:pointer}
 </style>
 </head>
 <body>

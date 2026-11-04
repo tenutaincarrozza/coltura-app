@@ -9,9 +9,11 @@ const GOALS=[[30,"Leggero","10-15 minuti"],[60,"Regolare","20-30 minuti"],[100,"
 const MILES=[[3,"Incubazione","🧫",30],[7,"Colonia stabile","🔬",70],[14,"Ceppo resistente","🧬",150],[30,"Coltura madre","🏆",300],[60,"Biobanca","💎",500],[100,"Premio Nobel","🥇",1000]];
 const SUBJECTS=Object.keys(SUBJ);
 const $app=document.getElementById("app");
+const AGENT_ID="agent_7301m6knqh21esvrjhzb31hbt1yp";
+const EL_SDK="./elevenlabs-client.js";
 
 /* ---------- storage ---------- */
-function base(){return{name:"Emilia",xp:0,done:{},err:{},studied:{},stats:{},days:{},goalDays:{},frozen:{},streak:0,best:0,lastGoal:null,freezes:0,goal:60,exam:{},today:{},planStart:{},badges:{},recovered:0,lastSubj:"mi"}}
+function base(){return{name:"Emilia",xp:0,done:{},err:{},studied:{},stats:{},days:{},goalDays:{},frozen:{},streak:0,best:0,lastGoal:null,freezes:0,goal:60,exam:{},today:{},planStart:{},badges:{},recovered:0,lastSubj:"mi",orali:[]}}
 function load(){
   try{const r=JSON.parse(localStorage.getItem(KEY)||"null");if(r&&typeof r==="object")return Object.assign(base(),r)}catch(e){}
   const s=base();
@@ -85,6 +87,8 @@ function goalReached(){
   checkBadges()}
 const BADGES=[
   ["first","Prima piastra","🧪","Completa il primo capitolo",()=>Object.keys(CH).some(complete)],
+  ["orale1","Prima interrogazione","🎓","Fai un’interrogazione col professore",()=>(S.orali||[]).length>=1],
+  ["lode","30 e lode","🏅","Prendi 30 e lode all’interrogazione",()=>(S.orali||[]).some(o=>o.lode)],
   ["perfect","Piastra sterile","✨","Quiz di almeno 5 domande senza errori",()=>!!S.badges.perfect],
   ["rec25","Seconda possibilità","♻️","Recupera 25 errori",()=>S.recovered>=25],
   ["goals10","Costanza","📅","Raggiungi l’obiettivo 10 volte",()=>Object.keys(S.goalDays).length>=10],
@@ -183,7 +187,7 @@ function home(){
   h+='<main class="wrap"><section class="hero"><div><p class="hello">'+greet()+' 👋</p><h1>'+esc(s.name).replace(" ","<br>")+'</h1><div style="margin-top:16px">'+segSubj()+'</div></div>';
   h+='<div class="level"><div class="sub">Livello '+(L.i+1)+' di '+LEVELS.length+'</div><div class="name">'+esc(L.name)+'</div><div class="bar"><i style="width:'+L.pct.toFixed(0)+'%"></i></div><div class="sub">'+(L.next?(STEP-S.xp%STEP)+" XP a "+esc(L.next):"Livello massimo raggiunto")+'</div></div></section>';
   h+='<div class="today">'+streakCard()+planCard(V.subj)+'</div>';
-  h+='<div class="actions"><button class="btn primary" data-a="mix">Sfida mista: 10 domande</button><button class="btn" data-a="errors">Ripassa gli errori ('+errKeys(V.subj).length+')</button></div>';
+  h+='<div class="actions"><button class="btn primary" data-a="mix">Sfida mista: 10 domande</button><button class="btn" data-a="errors">Ripassa gli errori ('+errKeys(V.subj).length+')</button><button class="btn gram" data-a="orale">🎓 Interrogazione col professore</button></div>';
   h+='<div class="grid'+grow+'">';
   s.ch.forEach(c=>{const m=mastery(c.key);h+='<button class="plate'+(m>=.8?" done":"")+'" data-a="open" data-ch="'+c.key+'">'+plate(c.key)+'<span class="n">Capitolo '+c.id+'</span><span class="t">'+esc(c.t)+'</span><span class="m"><span>'+Math.round(m*100)+'% padroneggiato</span><span>'+(m>=.8?"✓":"")+'</span></span></button>'});
   h+='</div><p class="muted" style="margin-top:28px;font-size:.9rem">I progressi restano salvati su questo dispositivo, in questo browser. <button class="btn small" data-a="settings">Fai un backup</button></p></main>';
@@ -314,13 +318,83 @@ function runEnd(){const r=V.run;const ok=r.res.filter(x=>x==="ok").length;const 
   return h+'</div></div>'}
 function runScreen(){return topbar('<button class="back" data-a="'+(V.run&&V.run.back?"backrun":"home")+'">‹ Esci</button>')+'<main class="wrap"><div class="narrow" style="padding-top:22px">'+runnerView()+'</div></main>'}
 
+/* ---------- interrogazione col professore (ElevenLabs) ---------- */
+const OR={sel:null,num:6,corr:"alla fine",conv:null,status:"setup",mode:"",log:[],result:null,err:"",started:0,timer:null};
+function orSel(){if(!OR.sel){OR.sel={};const sk=V.subj;SUBJ[sk].ch.forEach(c=>OR.sel[c.key]=1)}return OR.sel}
+function orKeys(){const s=orSel();return Object.keys(CH).filter(k=>s[k])}
+function orAmbito(keys){
+  const parts=[];SUBJECTS.forEach(sk=>{const all=SUBJ[sk].ch.map(c=>c.key);const inS=all.filter(k=>keys.includes(k));if(!inS.length)return;
+    if(inS.length===all.length)parts.push("tutto il programma di "+SUBJ[sk].name);
+    else parts.push(SUBJ[sk].name+", "+(inS.length===1?"capitolo ":"capitoli ")+inS.map(k=>CH[k].id+" ("+CH[k].t+")").join(", "))});
+  return parts.join("; e ")}
+function orMateriale(keys){return keys.map(k=>{const c=CH[k];return "## "+SUBJ[c.subj].name+" – Cap. "+c.id+": "+c.t+"\n"+c.topics.map(t=>"### "+t[0]+"\n"+t[1].map(x=>"- "+x).join("\n")).join("\n")+"\nDa ricordare: "+c.recap.join(" ")}).join("\n\n")}
+function votoTxt(o){return o.voto<18?"Non sufficiente":o.voto+(o.lode?" e lode":"")+"/30"}
+function orHistory(){const h=(S.orali||[]).slice().reverse();if(!h.length)return "";
+  return '<section class="panel"><h3>Le tue interrogazioni</h3>'+h.slice(0,10).map(o=>'<div class="erow"><span class="x" style="background:'+(o.voto>=18?"var(--ok-soft);color:var(--ok)":"var(--saf-soft)")+';min-width:54px">'+(o.voto<18?"✗":o.voto+(o.lode?"L":""))+'</span><div class="tx">'+esc(o.ambito)+'<div class="tp">'+nice(o.data)+(o.giudizio?" · "+esc(o.giudizio):"")+'</div></div></div>').join("")+'</section>'}
+function oraleView(){
+  let h=topbar('<button class="back" data-a="home">‹ Home</button>');
+  h+='<main class="wrap"><div class="narrow"><div class="chead"><div><div class="n">Simulazione d’esame orale</div><h2>Interrogazione col professore</h2><div class="s">Parli a voce con il professore: ti fa le domande, ti aiuta se non sai, alla fine ti corregge e ti dà un voto in trentesimi.</div></div></div>';
+  if(OR.status==="setup"){
+    const s=orSel();const keys=orKeys();
+    h+='<section class="panel"><h3>Su cosa vuoi essere interrogata?</h3>';
+    SUBJECTS.forEach(sk=>{const all=SUBJ[sk].ch;const n=all.filter(c=>s[c.key]).length;
+      h+='<div style="margin:14px 0 8px;display:flex;justify-content:space-between;align-items:center;gap:8px;flex-wrap:wrap"><b>'+esc(SUBJ[sk].name)+' <span class="muted" style="font-weight:600">('+n+'/'+all.length+')</span></b><span><button class="btn small" data-a="orall" data-s="'+sk+'">Tutto</button> <button class="btn small" data-a="ornone" data-s="'+sk+'">Nessuno</button></span></div><div style="display:flex;flex-wrap:wrap;gap:6px">'+
+      all.map(c=>'<button class="chip'+(s[c.key]?" y":"")+'" data-a="orch" data-ch="'+c.key+'" aria-pressed="'+!!s[c.key]+'">'+(s[c.key]?"✓ ":"")+c.id+'. '+esc(c.t)+'</button>').join("")+'</div>'});
+    h+='</section><section class="panel"><h3>Come si svolge</h3><p class="muted" style="margin:0 0 6px">Quante domande principali</p><div class="seg">'+[4,6,8,12].map(n=>'<button data-a="ornum" data-x="'+n+'" aria-pressed="'+(OR.num===n)+'">'+n+'</button>').join("")+'</div>'+
+      '<p class="muted" style="margin:16px 0 6px">Quando ti corregge</p><div class="seg"><button data-a="orcorr" data-x="alla fine" aria-pressed="'+(OR.corr==="alla fine")+'">Alla fine, come all’esame</button><button data-a="orcorr" data-x="subito" aria-pressed="'+(OR.corr==="subito")+'">Subito, dopo ogni risposta</button></div>'+
+      '<p class="muted" style="margin:16px 0 0;font-size:.92rem">Se non sai una risposta dillo pure (“non lo so”, “non ricordo”): ti darà un indizio e poi la risposta. Durata massima 20 minuti. Serve il permesso al microfono.</p></section>';
+    if(OR.err)h+='<p class="status ko" style="margin:0 0 12px">'+esc(OR.err)+'</p>';
+    h+='<div class="next" style="margin-bottom:22px"><button class="btn primary" data-a="orstart" '+(keys.length?"":"disabled")+'>🎙️ Inizia l’interrogazione</button></div>'+orHistory();
+  }else if(OR.status==="result"){
+    const o=OR.result;
+    if(o){h+='<section class="panel" style="text-align:center"><p class="muted" style="margin:0">'+esc(o.ambito)+'</p><p class="big" style="margin:8px 0 0">'+(o.voto>=28?"🏅":o.voto>=18?"🎓":"📚")+'</p><h3 style="font-size:2.6rem;margin:4px 0;letter-spacing:-.03em">'+votoTxt(o)+'</h3><p style="font-family:var(--serif);font-size:1.1rem">'+esc(o.giudizio||"")+'</p>'+(o.xp?'<p class="muted">+'+o.xp+' XP</p>':'')+'</section>'+
+      (o.punti_forti?'<section class="panel"><h3>Cosa hai saputo bene</h3><p style="font-family:var(--serif);margin:0;line-height:1.6">'+esc(o.punti_forti)+'</p></section>':'')+
+      (o.da_ripassare?'<section class="panel"><h3>Da ripassare</h3><p style="font-family:var(--serif);margin:0;line-height:1.6;white-space:pre-line">'+esc(o.da_ripassare)+'</p></section>':'')}
+    else h+='<section class="panel"><h3>Interrogazione interrotta</h3><p class="muted" style="margin:0">La conversazione si è chiusa prima che il professore desse il voto. Puoi rileggere la trascrizione qui sotto o ricominciare.</p></section>';
+    h+=orLogHTML()+'<div class="next"><button class="btn" data-a="home">Torna alla home</button><button class="btn primary" data-a="ornew">Nuova interrogazione</button></div>';
+  }else{
+    const lab={connecting:"Mi collego al professore…",listening:"Ti ascolto",speaking:"Il professore parla"}[OR.status==="connecting"?"connecting":OR.mode==="speaking"?"speaking":"listening"];
+    h+='<section class="panel" style="text-align:center"><div class="orb'+(OR.mode==="speaking"?" talk":"")+(OR.status==="connecting"?" wait":"")+'" aria-hidden="true">🎓</div><p style="font-weight:700;font-size:1.15rem;margin:10px 0 2px" id="orlab">'+lab+'</p><p class="muted" style="margin:0" id="ortime"></p><div class="next" style="justify-content:center"><button class="btn" data-a="orstop">Termina l’interrogazione</button></div></section>'+orLogHTML();
+  }
+  return h+'</div></main>'}
+function orLogHTML(){if(!OR.log.length)return "";return '<section class="panel"><h3>Trascrizione</h3><div id="orlog">'+OR.log.map(m=>'<div class="erow"><span class="x" style="'+(m.r==="ai"?"background:var(--gram-soft);color:var(--gram)":"background:var(--agar-soft);color:var(--ink)")+'">'+(m.r==="ai"?"P":nm().slice(0,1)||"Tu")+'</span><div class="tx">'+esc(m.t)+'</div></div>').join("")+'</div></section>'}
+function orRefresh(){if(V.view!=="orale")return;const y=window.scrollY;render();window.scrollTo(0,y)}
+function orTick(){const el=document.getElementById("ortime");if(!el||!OR.started)return;const s=Math.floor((Date.now()-OR.started)/1000);el.textContent=Math.floor(s/60)+":"+String(s%60).padStart(2,"0")+" di 20:00"}
+async function oraleStart(){
+  const keys=orKeys();if(!keys.length)return;
+  OR.status="connecting";OR.err="";OR.log=[];OR.result=null;OR.mode="";render();window.scrollTo(0,0);
+  const ambito=orAmbito(keys);
+  try{
+    await navigator.mediaDevices.getUserMedia({audio:true}).then(st=>st.getTracks().forEach(t=>t.stop()));
+    const {Conversation}=await import(EL_SDK);
+    OR.conv=await Conversation.startSession({
+      agentId:AGENT_ID,connectionType:"webrtc",
+      dynamicVariables:{nome:S.name||"studentessa",ambito,correzioni:OR.corr,num_domande:String(OR.num),materiale:orMateriale(keys)},
+      clientTools:{registra_voto:(p)=>{oraleVoto(p,ambito);return "Voto registrato nell'app."}},
+      onConnect:()=>{OR.status="live";OR.started=Date.now();clearInterval(OR.timer);OR.timer=setInterval(orTick,1000);orRefresh()},
+      onModeChange:({mode})=>{OR.mode=mode;const l=document.getElementById("orlab");const o=document.querySelector(".orb");if(l)l.textContent=mode==="speaking"?"Il professore parla":"Ti ascolto";if(o)o.classList.toggle("talk",mode==="speaking")},
+      onMessage:(m)=>{const t=(m.message||"").replace(/\[[^\]]{1,24}\]\s*/g,"").trim();if(!t)return;OR.log.push({r:(m.role||m.source)==="user"?"user":"ai",t});orRefresh()},
+      onError:(e)=>{console.warn("ElevenLabs:",e)},
+      onDisconnect:()=>{clearInterval(OR.timer);OR.conv=null;if(OR.status!=="setup"){OR.status="result";orRefresh()}}
+    });
+  }catch(e){
+    console.warn(e);OR.conv=null;OR.status="setup";
+    OR.err=(e&&e.name==="NotAllowedError")?"Serve il permesso al microfono: consentilo nelle impostazioni del browser e riprova.":"Non riesco a collegarmi al professore. Controlla la connessione e riprova tra poco.";
+    render()}}
+function oraleVoto(p,ambito){
+  const voto=Math.max(0,Math.min(30,Math.round(+p.voto||0)));
+  const o={data:today(),ambito,voto,lode:!!p.lode&&voto===30,giudizio:String(p.giudizio||""),punti_forti:String(p.punti_forti||""),da_ripassare:String(p.da_ripassare||""),domande:OR.num};
+  o.xp=voto>=18?20+(voto-18)*5+(o.lode?40:0):10;
+  S.orali=(S.orali||[]).concat([o]);OR.result=o;save();addXP(o.xp);checkBadges();toast("Voto registrato: "+votoTxt(o))}
+function oraleStop(silent){clearInterval(OR.timer);const c=OR.conv;OR.conv=null;if(c){try{c.endSession()}catch(e){}}if(silent){OR.status="setup";return}OR.status="result";render()}
+
 /* ---------- render & events ---------- */
 function render(){
-  const f={home,chapter:chapterView,errors:errorsView,run:runScreen,plan:planView,rewards:rewardsView,settings:settingsView}[V.view];
+  const f={home,chapter:chapterView,errors:errorsView,run:runScreen,plan:planView,rewards:rewardsView,settings:settingsView,orale:oraleView}[V.view];
   $app.innerHTML=f();
   const gi=document.getElementById("gapin");if(gi){gi.focus({preventScroll:true});gi.addEventListener("keydown",e=>{if(e.key==="Enter")act("gapcheck")})}
   flush()}
-function go(view){V.view=view;V.run=null;render();window.scrollTo(0,0)}
+function go(view){if(V.view==="orale"&&view!=="orale")oraleStop(true);V.view=view;V.run=null;render();window.scrollTo(0,0)}
 function openTab(t){V.tab=t;if(t!=="studia"&&t!=="recap")newRun(tabRun(CH[V.ch],t),TABTITLE[t]);else V.run=null}
 function bkCode(){return "COLTURA1:"+btoa(unescape(encodeURIComponent(JSON.stringify(S))))}
 function bkRestore(txt){
@@ -369,6 +443,15 @@ function act(a,el){
     case "bkcopy":{const c=bkCode();const ok=()=>{S.lastBackup=today();save();render();toast("Codice copiato: incollalo nelle Note o mandalo in chat")};if(navigator.clipboard&&navigator.clipboard.writeText)navigator.clipboard.writeText(c).then(ok,()=>fallbackCopy(c,ok));else fallbackCopy(c,ok);break}
     case "bkdown":{const b=new Blob([bkCode()],{type:"text/plain"});const l=document.createElement("a");l.href=URL.createObjectURL(b);l.download="coltura-backup-"+today()+".txt";document.body.appendChild(l);l.click();l.remove();S.lastBackup=today();save();toast("File di backup creato");break}
     case "bkimport":bkRestore((document.getElementById("bkin")||{}).value||"");break;
+    case "orale":OR.status="setup";OR.err="";go("orale");break;
+    case "orch":{const k=el.dataset.ch;const s=orSel();if(s[k])delete s[k];else s[k]=1;orRefresh();break}
+    case "orall":{const s=orSel();SUBJ[el.dataset.s].ch.forEach(c=>s[c.key]=1);orRefresh();break}
+    case "ornone":{const s=orSel();SUBJ[el.dataset.s].ch.forEach(c=>delete s[c.key]);orRefresh();break}
+    case "ornum":OR.num=+el.dataset.x;orRefresh();break;
+    case "orcorr":OR.corr=el.dataset.x;orRefresh();break;
+    case "orstart":oraleStart();break;
+    case "orstop":oraleStop(false);break;
+    case "ornew":OR.status="setup";OR.log=[];OR.result=null;render();window.scrollTo(0,0);break;
     case "reset":if(confirm("Azzerare XP, serie, badge, errori e piani? L’operazione non si può annullare.")){const n=S.name;S=base();S.name=n;save();go("home");toast("Progressi azzerati")}break;
   }
 }
