@@ -1,4 +1,4 @@
-/* Coltura – logica dell'app. I progressi restano nel localStorage del dispositivo. */
+/* Coltura – logica dell'app. Progressi in locale e sincronizzati sull'account Supabase. */
 (function(){
 const KEY="coltura-v2",OLDKEY="coltura-malattie-infettive-v1";
 const LEVELS=["Spora","Colonia","Coltura pura","Gram-positiva","Antibiogramma","Specializzanda","Infettivologa","Primaria di reparto"];
@@ -11,9 +11,12 @@ const SUBJECTS=Object.keys(SUBJ);
 const $app=document.getElementById("app");
 const AGENT_ID="agent_7301m6knqh21esvrjhzb31hbt1yp";
 const EL_SDK="./elevenlabs-client.js";
+const SB_URL="https://bctheezoormqthmjklgl.supabase.co",SB_KEY="sb_publishable_GhsWgxqGzKIOD8RQ1DGNcg_COmMvel_";
+const SB=window.supabase?window.supabase.createClient(SB_URL,SB_KEY,{auth:{persistSession:true,autoRefreshToken:true,storageKey:"coltura-auth"}}):null;
+const CL={user:null,profile:null,ready:!SB,mode:"login",err:"",info:"",busy:false,syncT:null,recovery:false,admin:null,adminSel:null,pickSubj:null};
 
 /* ---------- storage ---------- */
-function base(){return{name:"Emilia",xp:0,done:{},err:{},studied:{},stats:{},days:{},goalDays:{},frozen:{},streak:0,best:0,lastGoal:null,freezes:0,goal:60,exam:{},today:{},planStart:{},badges:{},recovered:0,lastSubj:"mi",orali:[]}}
+function base(){return{name:"",xp:0,done:{},err:{},studied:{},stats:{},days:{},goalDays:{},frozen:{},streak:0,best:0,lastGoal:null,freezes:0,goal:60,exam:{},today:{},planStart:{},badges:{},recovered:0,lastSubj:"mi",orali:[]}}
 function load(){
   try{const r=JSON.parse(localStorage.getItem(KEY)||"null");if(r&&typeof r==="object")return Object.assign(base(),r)}catch(e){}
   const s=base();
@@ -26,7 +29,10 @@ function load(){
   }}catch(e){}
   return s}
 let S=load();
-function save(){try{localStorage.setItem(KEY,JSON.stringify(S))}catch(e){}}
+function save(){S.updatedAt=Date.now();try{localStorage.setItem(KEY,JSON.stringify(S))}catch(e){}cloudPush()}
+function cloudPush(now){if(!SB||!CL.user)return;clearTimeout(CL.syncT);const run=async()=>{const L=lvl(S.xp);const{error}=await SB.from("progress").upsert({user_id:CL.user.id,state:S,xp:S.xp,level:L.i+1,streak:S.streak,updated_at:new Date().toISOString()});if(error)console.warn("sync",error.message)};if(now)run();else CL.syncT=setTimeout(run,1500)}
+function cloudLog(table,row){if(!SB||!CL.user)return;SB.from(table).insert(Object.assign({user_id:CL.user.id},row)).then(({error})=>{if(error)console.warn(table,error.message)})}
+function mySubj(){const p=(CL.profile&&CL.profile.subjects)||[];const l=SUBJECTS.filter(k=>p.includes(k));return l.length?l:SUBJECTS}
 
 /* ---------- helpers ---------- */
 function esc(s){return String(s).replace(/[&<>"]/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]))}
@@ -94,8 +100,7 @@ const BADGES=[
   ["perfect","Piastra sterile","✨","Quiz di almeno 5 domande senza errori",()=>!!S.badges.perfect],
   ["rec25","Seconda possibilità","♻️","Recupera 25 errori",()=>S.recovered>=25],
   ["goals10","Costanza","📅","Raggiungi l’obiettivo 10 volte",()=>Object.keys(S.goalDays).length>=10],
-  ["mi","Infettivologa","🦠","Completa tutta Malattie infettive",()=>SUBJ.mi.ch.every(c=>complete(c.key))],
-  ["de","Dermatologa","🧴","Completa tutta Dermatologia",()=>SUBJ.de.ch.every(c=>complete(c.key))]];
+  ...SUBJECTS.map(k=>[k,(SUBJ[k].badge||["Esperta di "+SUBJ[k].short,"📘"])[0],(SUBJ[k].badge||["","📘"])[1],"Completa tutta "+SUBJ[k].name,()=>SUBJ[k].ch.every(c=>complete(c.key))])];
 function checkBadges(){BADGES.forEach(([k,name,ic,desc,f])=>{if(!S.badges[k]&&f()){S.badges[k]=today();queue.push(overlayHTML(ic,"Nuovo badge: "+esc(name),esc(desc)+". Bravissima, "+nm()+"!"))}})}
 function overlayHTML(ic,title,body){return '<div class="box"><p class="big">'+ic+'</p><h3>'+title+'</h3><p class="muted">'+body+'</p><button class="btn primary" data-a="closeov">Continua</button></div>'}
 function flush(){if(document.querySelector(".overlay")||!queue.length)return;const o=document.createElement("div");o.className="overlay";o.innerHTML=queue.shift();document.body.appendChild(o);save()}
@@ -140,7 +145,7 @@ function suggestedGoal(sk){const pl=plan(sk);if(!pl||pl.past)return null;const r
   return Math.min(160,Math.max(30,Math.round(per*170/10)*10))}
 
 /* ---------- state ---------- */
-let V={view:"home",subj:SUBJECTS.includes(S.lastSubj)?S.lastSubj:"mi",ch:null,tab:"studia",blur:false,run:null,firstHome:true};
+let V={view:"home",subj:SUBJECTS.includes(S.lastSubj)?S.lastSubj:SUBJECTS[0],ch:null,tab:"studia",blur:false,run:null,firstHome:true};
 
 /* ---------- petri dish ---------- */
 function rng(seed){let s=seed*9301+49297;return()=>{s=(s*9301+49297)%233280;return s/233280}}
@@ -150,14 +155,14 @@ function plateInner(seed,m){
   for(let k=0;k<N;k++){const a=r()*Math.PI*2,d=Math.sqrt(r())*34,x=50+Math.cos(a)*d,y=50+Math.sin(a)*d,rad=2+r()*4.2,c=cols[Math.floor(r()*cols.length)];
     if(k<shown)s+='<circle class="colony" style="--d:'+k+'" cx="'+x.toFixed(1)+'" cy="'+y.toFixed(1)+'" r="'+rad.toFixed(1)+'" fill="'+c+'" opacity=".85"/>'}
   return s}
-function seedOf(ck){const c=CH[ck];return c.id+(c.subj==="de"?40:0)}
+function seedOf(ck){const c=CH[ck];return c.id+SUBJECTS.indexOf(c.subj)*40}
 function plate(ck,cls){const m=mastery(ck);return '<svg viewBox="0 0 100 100" class="'+(cls||"")+'" role="img" aria-label="Padronanza '+Math.round(m*100)+'%">'+plateInner(seedOf(ck),m)+'</svg>'}
 
 /* ---------- top bar ---------- */
 function topbar(left){
   const e=errKeys().length;
   return '<header class="top"><div class="wrap">'+left+'<span class="spacer"></span><button class="pill" data-a="rewards" title="Serie di giorni con obiettivo raggiunto">🔥 '+S.streak+'</button><span class="pill hide-s">'+S.xp+' XP</span><button class="pill'+(e?" err":"")+'" data-a="errors">'+e+'<span class="hide-s">&nbsp;da rivedere</span></button><button class="pill" data-a="settings" aria-label="Impostazioni">⚙︎</button></div></header>'}
-function segSubj(){return '<div class="seg" role="group" aria-label="Materia">'+SUBJECTS.map(k=>'<button aria-pressed="'+(V.subj===k)+'" data-a="subj" data-s="'+k+'">'+esc(SUBJ[k].short)+'</button>').join("")+'</div>'}
+function segSubj(){const l=mySubj();if(l.length<2)return '';return '<div class="seg segw" role="group" aria-label="Materia">'+l.map(k=>'<button aria-pressed="'+(V.subj===k)+'" data-a="subj" data-s="'+k+'">'+esc(SUBJ[k].short)+'</button>').join("")+'</div>'}
 
 /* ---------- home ---------- */
 function greet(){const h=new Date().getHours();return(h<12?"Buongiorno":h<18?"Buon pomeriggio":"Buonasera")+(S.name?", "+nm():"")}
@@ -192,7 +197,7 @@ function home(){
   h+='<div class="actions"><button class="btn primary" data-a="mix">Sfida mista: 10 domande</button><button class="btn" data-a="errors">Ripassa gli errori ('+errKeys(V.subj).length+')</button><button class="btn gram" data-a="orale">🎓 Interrogazione col professore</button></div>';
   h+='<div class="grid'+grow+'">';
   s.ch.forEach(c=>{const m=mastery(c.key);h+='<button class="plate'+(m>=.8?" done":"")+'" data-a="open" data-ch="'+c.key+'">'+plate(c.key)+'<span class="n">Capitolo '+c.id+'</span><span class="t">'+esc(c.t)+'</span><span class="m"><span>'+Math.round(m*100)+'% padroneggiato</span><span>'+(m>=.8?"✓":"")+'</span></span></button>'});
-  h+='</div><p class="muted" style="margin-top:28px;font-size:.9rem">I progressi restano salvati su questo dispositivo, in questo browser. <button class="btn small" data-a="settings">Fai un backup</button></p></main>';
+  h+='</div><p class="muted" style="margin-top:28px;font-size:.9rem">'+(CL.user?'I progressi sono salvati nel tuo account ('+esc(CL.user.email)+') e li ritrovi su qualsiasi dispositivo.':'I progressi restano salvati su questo dispositivo.')+'</p></main>';
   return h}
 
 /* ---------- plan view ---------- */
@@ -223,9 +228,10 @@ function settingsView(){
   const sg=suggestedGoal(V.subj);
   let h=topbar('<button class="back" data-a="home">‹ Home</button>');
   h+='<main class="wrap"><div class="narrow"><div class="chead"><div><h2>Impostazioni</h2></div></div>';
+  if(CL.user){const sel=CL.pickSubj||mySubj();h+='<section class="panel"><h3>Il tuo account</h3><p class="muted" style="margin:0 0 12px">'+esc(CL.user.email)+'</p><p style="margin:0 0 8px;font-weight:600">Cosa stai studiando</p><div style="display:flex;flex-wrap:wrap;gap:6px">'+SUBJECTS.map(k=>'<button class="chip'+(sel.includes(k)?" y":"")+'" data-a="pksubj" data-s="'+k+'" aria-pressed="'+sel.includes(k)+'">'+(sel.includes(k)?"✓ ":"")+esc(SUBJ[k].name)+'</button>').join("")+'</div><div class="next" style="justify-content:flex-start"><button class="btn primary" data-a="savesubj">Salva le materie</button>'+(CL.profile&&CL.profile.is_admin?'<button class="btn gram" data-a="admin">📊 Dashboard studenti</button>':'')+'<button class="btn" data-a="logout">Esci</button></div></section>'}
   h+='<section class="panel"><h3>Il tuo nome</h3><div class="datebox"><input id="nm" value="'+nm()+'" aria-label="Nome" style="flex:1"><button class="btn primary" data-a="setname">Salva</button></div></section>';
   h+='<section class="panel"><h3>Obiettivo giornaliero</h3><p class="muted" style="margin:0">'+(sg?"Per arrivare pronta all’esame di "+esc(SUBJ[V.subj].name)+" ti consiglio circa "+sg+" XP al giorno.":"Imposta la data dell’esame per ricevere un obiettivo consigliato.")+'</p><div class="goals">'+GOALS.map(([x,n,t])=>'<button aria-pressed="'+(S.goal===x)+'" data-a="goal" data-x="'+x+'"><b>'+n+'</b><span>'+x+' XP, '+t+'</span></button>').join("")+(sg&&!GOALS.some(g=>g[0]===sg)?'<button aria-pressed="'+(S.goal===sg)+'" data-a="goal" data-x="'+sg+'"><b>Consigliato</b><span>'+sg+' XP</span></button>':"")+'</div></section>';
-  h+='<section class="panel"><h3>Date degli esami</h3>'+SUBJECTS.map(k=>'<p style="margin:6px 0">'+esc(SUBJ[k].name)+': <b>'+(S.exam[k]?nice(S.exam[k]):"non impostata")+'</b></p>').join("")+'</section>';
+  h+='<section class="panel"><h3>Date degli esami</h3>'+mySubj().map(k=>'<p style="margin:6px 0">'+esc(SUBJ[k].name)+': <b>'+(S.exam[k]?nice(S.exam[k]):"non impostata")+'</b></p>').join("")+'</section>';
   h+='<section class="panel"><h3>Backup dei progressi</h3><p class="muted" style="margin:0 0 10px">Salva un codice con tutti i tuoi progressi: XP, serie, errori, piano e badge. Ti serve se cambi dispositivo, se cancelli i dati del browser o se cambia l’indirizzo dell’app.</p><div class="next" style="justify-content:flex-start;margin-top:0"><button class="btn primary" data-a="bkcopy">Copia codice di backup</button><button class="btn" data-a="bkdown">Scarica file di backup</button></div><p style="margin:18px 0 6px;font-weight:600">Ripristina da un backup</p><textarea id="bkin" placeholder="Incolla qui il codice di backup" style="min-height:90px"></textarea><div class="next" style="justify-content:flex-start"><button class="btn primary" data-a="bkimport">Importa dal codice</button><label class="btn" style="cursor:pointer">Importa da file<input type="file" id="bkfile" accept=".txt,.json,text/plain" hidden></label></div>'+(S.lastBackup?'<p class="muted" style="margin:10px 0 0">Ultimo backup: '+nice(S.lastBackup)+'</p>':'<p class="muted" style="margin:10px 0 0">Non hai ancora fatto un backup.</p>')+'</section>';
   h+='<section class="panel"><h3>Azzera</h3><p class="muted" style="margin:0 0 10px">Cancella XP, serie, badge, errori e piani salvati su questo dispositivo.</p><button class="btn" data-a="reset">Azzera tutti i progressi</button></section></div></main>';return h}
 
@@ -268,7 +274,7 @@ function errorsView(){
   const keys=errKeys();
   if(!keys.length)h+='<div class="panel empty"><p style="font-size:1.2rem;color:var(--ink);font-weight:700">Nessun errore in sospeso.</p><p>Fai un quiz o una sfida mista: gli errori compariranno qui.</p><button class="btn primary" data-a="mix">Inizia la sfida mista</button></div>';
   else{
-    h+='<div class="actions">'+SUBJECTS.map(sk=>{const n=errKeys(sk).length;return n?'<button class="btn'+(sk===V.subj?" primary":"")+'" data-a="reviewsubj" data-s="'+sk+'">Ripassa '+esc(SUBJ[sk].short)+' ('+n+')</button>':""}).join("")+'</div>';
+    h+='<div class="actions">'+mySubj().map(sk=>{const n=errKeys(sk).length;return n?'<button class="btn'+(sk===V.subj?" primary":"")+'" data-a="reviewsubj" data-s="'+sk+'">Ripassa '+esc(SUBJ[sk].short)+' ('+n+')</button>':""}).join("")+'</div>';
     const by={};keys.forEach(k=>{(by[IDX[k].ch]=by[IDX[k].ch]||[]).push(k)});
     Object.keys(CH).filter(ck=>by[ck]).forEach(ck=>{const c=CH[ck];by[ck].sort((a,b)=>S.err[b].n-S.err[a].n);
       h+='<section class="panel"><h3>'+esc(SUBJ[c.subj].short)+', '+c.id+'. '+esc(c.t)+'</h3>'+by[ck].map(errRow).join("")+'<div class="next"><button class="btn small" data-a="open" data-ch="'+ck+'" data-t="recap">Vai al capitolo</button></div></section>'})}
@@ -311,7 +317,7 @@ function done(res){const r=V.run;const it=r.items[r.i];r.res[r.i]=res;
   if(res==="ok"){r.combo++;if(r.combo>=3){g+=2;addXP(2)}}else r.combo=0;
   r.xp+=g;if(g)toast((o.rec?"Errore recuperato! ":"")+"+"+g+" XP"+(res==="ok"&&r.combo>=3?" (combo)":""))}
 function runEnd(){const r=V.run;const ok=r.res.filter(x=>x==="ok").length;const tot=r.items.length;
-  if(!r.ended){r.ended=1;if(ok===tot&&tot>=5&&r.items.every(x=>x.type==="q")&&!S.badges.perfect){S.badges.perfect=today();queue.push(overlayHTML("✨","Nuovo badge: Piastra sterile","Quiz senza nemmeno un errore. Bravissima, "+nm()+"!"));save();setTimeout(flush,300)}}
+  if(!r.ended){r.ended=1;{const ck=V.view==="chapter"?V.ch:null;cloudLog("quiz_results",{subj:ck?CH[ck].subj:V.subj,chapter:ck?CH[ck].id:0,kind:ck?V.tab:(r.title||"run"),score:ok,total:tot,wrong:r.items.filter((_,k)=>r.res[k]!=="ok").map(x=>x.id)})}if(ok===tot&&tot>=5&&r.items.every(x=>x.type==="q")&&!S.badges.perfect){S.badges.perfect=today();queue.push(overlayHTML("✨","Nuovo badge: Piastra sterile","Quiz senza nemmeno un errore. Bravissima, "+nm()+"!"));save();setTimeout(flush,300)}}
   const msg=ok===tot?"Piastra pulita, "+nm()+": nessun errore!":ok/tot>=.7?"Ottimo lavoro, "+nm()+". Gli errori sono nella lista da rivedere.":"Rileggi la parte di studio e riprova: gli errori sono salvati.";
   let h='<div class="qcard" style="text-align:center"><p class="muted" style="margin:0">'+esc(r.title)+'</p><h3 style="font-size:2.6rem;margin:6px 0;letter-spacing:-.03em">'+ok+' / '+tot+'</h3><p>'+msg+'</p><p class="muted">+'+r.xp+' XP in questa sessione, '+(S.days[today()]||0)+' di '+S.goal+' XP oggi</p><div class="next" style="justify-content:center">';
   if(ok<tot)h+='<button class="btn" data-a="retrywrong">Rifai solo le sbagliate</button>';
@@ -321,9 +327,10 @@ function runEnd(){const r=V.run;const ok=r.res.filter(x=>x==="ok").length;const 
 function runScreen(){return topbar('<button class="back" data-a="'+(V.run&&V.run.back?"backrun":"home")+'">‹ Esci</button>')+'<main class="wrap"><div class="narrow" style="padding-top:22px">'+runnerView()+'</div></main>'}
 
 /* ---------- interrogazione col professore (ElevenLabs) ---------- */
-const OR={sel:null,num:6,corr:"alla fine",conv:null,status:"setup",mode:"",log:[],result:null,err:"",started:0,timer:null};
-function orSel(){if(!OR.sel){OR.sel={};const sk=V.subj;SUBJ[sk].ch.forEach(c=>OR.sel[c.key]=1)}return OR.sel}
-function orKeys(){const s=orSel();return Object.keys(CH).filter(k=>s[k])}
+const OR={subj:null,sel:null,num:6,corr:"alla fine",conv:null,status:"setup",mode:"",log:[],result:null,err:"",started:0,timer:null};
+function orSubj(){const l=mySubj();if(!OR.subj||!l.includes(OR.subj))OR.subj=l.includes(V.subj)?V.subj:l[0];return OR.subj}
+function orSel(){const sk=orSubj();if(!OR.sel||OR.selFor!==sk){OR.sel={};OR.selFor=sk;SUBJ[sk].ch.forEach(c=>OR.sel[c.key]=1)}return OR.sel}
+function orKeys(){const s=orSel();return Object.keys(CH).filter(k=>s[k]&&CH[k].subj===OR.subj)}
 function orAmbito(keys){
   const parts=[];SUBJECTS.forEach(sk=>{const all=SUBJ[sk].ch.map(c=>c.key);const inS=all.filter(k=>keys.includes(k));if(!inS.length)return;
     if(inS.length===all.length)parts.push("tutto il programma di "+SUBJ[sk].name);
@@ -338,8 +345,8 @@ function oraleView(){
   h+='<main class="wrap"><div class="narrow"><div class="chead"><div><div class="n">Simulazione d’esame orale</div><h2>Interrogazione col professore</h2><div class="s">Parli a voce con il professore: ti fa le domande, ti aiuta se non sai, alla fine ti corregge e ti dà un voto in trentesimi.</div></div></div>';
   if(OR.status==="setup"){
     const s=orSel();const keys=orKeys();
-    h+='<section class="panel"><h3>Su cosa vuoi essere interrogata?</h3>';
-    SUBJECTS.forEach(sk=>{const all=SUBJ[sk].ch;const n=all.filter(c=>s[c.key]).length;
+    const ml=mySubj();h+='<section class="panel"><h3>Materia</h3>'+(ml.length>1?'<div class="seg segw">'+ml.map(k=>'<button data-a="orsubj" data-s="'+k+'" aria-pressed="'+(OR.subj===k)+'">'+esc(SUBJ[k].short)+'</button>').join("")+'</div>':'<p style="margin:0;font-weight:600">'+esc(SUBJ[OR.subj].name)+'</p>')+'<p class="muted" style="margin:10px 0 0">Il professore di '+esc(SUBJ[OR.subj].name)+' ti interroga solo su questa materia: scegli se su tutto il programma o su alcuni capitoli.</p></section><section class="panel"><h3>Su cosa vuoi essere interrogata?</h3>';
+    [OR.subj].forEach(sk=>{const all=SUBJ[sk].ch;const n=all.filter(c=>s[c.key]).length;
       h+='<div style="margin:14px 0 8px;display:flex;justify-content:space-between;align-items:center;gap:8px;flex-wrap:wrap"><b>'+esc(SUBJ[sk].name)+' <span class="muted" style="font-weight:600">('+n+'/'+all.length+')</span></b><span><button class="btn small" data-a="orall" data-s="'+sk+'">Tutto</button> <button class="btn small" data-a="ornone" data-s="'+sk+'">Nessuno</button></span></div><div style="display:flex;flex-wrap:wrap;gap:6px">'+
       all.map(c=>'<button class="chip'+(s[c.key]?" y":"")+'" data-a="orch" data-ch="'+c.key+'" aria-pressed="'+!!s[c.key]+'">'+(s[c.key]?"✓ ":"")+c.id+'. '+esc(c.t)+'</button>').join("")+'</div>'});
     h+='</section><section class="panel"><h3>Come si svolge</h3><p class="muted" style="margin:0 0 6px">Quante domande principali</p><div class="seg">'+[4,6,8,12].map(n=>'<button data-a="ornum" data-x="'+n+'" aria-pressed="'+(OR.num===n)+'">'+n+'</button>').join("")+'</div>'+
@@ -371,7 +378,7 @@ async function oraleStart(){
     const {Conversation}=await import(EL_SDK);
     OR.conv=await Conversation.startSession({
       agentId:AGENT_ID,connectionType:"webrtc",
-      dynamicVariables:{nome:S.name||"studentessa",ambito,correzioni:OR.corr,num_domande:String(OR.num),materiale:orMateriale(keys)},
+      dynamicVariables:{nome:S.name||"studentessa",materia:SUBJ[OR.subj].name,ambito,correzioni:OR.corr,num_domande:String(OR.num),materiale:orMateriale(keys)},
       clientTools:{registra_voto:(p)=>{oraleVoto(p,ambito);return "Voto registrato nell'app."}},
       onConnect:()=>{OR.status="live";OR.started=Date.now();clearInterval(OR.timer);OR.timer=setInterval(orTick,1000);orRefresh()},
       onModeChange:({mode})=>{OR.mode=mode;const l=document.getElementById("orlab");const o=document.querySelector(".orb");if(l)l.textContent=mode==="speaking"?"Il professore parla":"Ti ascolto";if(o)o.classList.toggle("talk",mode==="speaking")},
@@ -390,12 +397,128 @@ function oraleVoto(p,ambito){
   const voto=Math.max(0,Math.min(30,Math.round(+p.voto||0)));
   const o={data:today(),ambito,voto,lode:!!p.lode&&voto===30,giudizio:String(p.giudizio||""),punti_forti:String(p.punti_forti||""),da_ripassare:String(p.da_ripassare||""),domande:OR.num};
   o.xp=voto>=18?20+(voto-18)*5+(o.lode?40:0):10;
-  S.orali=(S.orali||[]).concat([o]);OR.result=o;save();addXP(o.xp);checkBadges();toast("Voto registrato: "+votoTxt(o))}
+  S.orali=(S.orali||[]).concat([o]);OR.result=o;save();cloudLog("oral_exams",{subj:OR.subj,ambito,voto,lode:o.lode,giudizio:o.giudizio,punti_forti:o.punti_forti,da_ripassare:o.da_ripassare,duration_s:OR.started?Math.round((Date.now()-OR.started)/1000):null});addXP(o.xp);checkBadges();toast("Voto registrato: "+votoTxt(o))}
 function oraleStop(silent){clearInterval(OR.timer);const c=OR.conv;OR.conv=null;if(c){try{c.endSession()}catch(e){}}if(silent){OR.status="setup";return}OR.status="result";render()}
+
+/* ---------- account: login, scelta materie, dashboard admin ---------- */
+function authShell(inner){return '<main class="wrap"><div class="narrow auth"><div class="authbrand"><span class="brand">Coltura</span><p class="muted">Studio gamificato per gli esami di Medicina</p></div>'+inner+'</div></main>'}
+function loadingView(){return authShell('<section class="panel" style="text-align:center"><p class="muted" style="margin:0">Carico il tuo account…</p></section>')}
+function authView(){
+  if(CL.recovery)return authShell('<section class="panel"><h3>Scegli una nuova password</h3><label class="fl">Nuova password<input id="au_pw" type="password" autocomplete="new-password" minlength="6"></label>'+(CL.err?'<p class="status ko">'+esc(CL.err)+'</p>':'')+'<div class="next"><button class="btn primary" data-a="aunewpw" '+(CL.busy?"disabled":"")+'>Salva password</button></div></section>');
+  const su=CL.mode==="signup";
+  let h='<section class="panel"><div class="seg segw" style="margin-bottom:16px"><button data-a="aumode" data-x="login" aria-pressed="'+!su+'">Accedi</button><button data-a="aumode" data-x="signup" aria-pressed="'+su+'">Registrati</button></div>';
+  h+='<form id="auform" onsubmit="return false">'+(su?'<label class="fl">Il tuo nome<input id="au_nm" autocomplete="given-name" maxlength="30"></label>':'')+
+    '<label class="fl">Email<input id="au_em" type="email" autocomplete="email" autocapitalize="off" spellcheck="false"></label>'+
+    '<label class="fl">Password<input id="au_pw" type="password" autocomplete="'+(su?"new-password":"current-password")+'" minlength="6"></label>';
+  if(CL.err)h+='<p class="status ko" style="margin:4px 0 0">'+esc(CL.err)+'</p>';
+  if(CL.info)h+='<p class="status ok" style="margin:4px 0 0">'+esc(CL.info)+'</p>';
+  h+='<div class="next"><button class="btn primary" data-a="'+(su?"ausignup":"aulogin")+'" '+(CL.busy?"disabled":"")+'>'+(CL.busy?"Un momento…":su?"Crea l’account":"Entra")+'</button></div></form>';
+  if(!su)h+='<p style="margin:14px 0 0;text-align:right"><button class="linkbtn" data-a="auforgot">Password dimenticata?</button></p>';
+  h+='</section>';
+  if(!su&&S.xp>0&&!S.uid)h+='<p class="muted" style="font-size:.92rem">Su questo dispositivo ci sono già '+S.xp+' XP di progressi: entrando o registrandoti per la prima volta li porti nel tuo account.</p>';
+  return authShell(h)}
+function onboardView(){
+  const sel=CL.pickSubj||[];
+  let h='<section class="panel"><h3>Ciao'+(S.name?" "+nm():"")+'! Cosa stai studiando?</h3><p class="muted" style="margin:0 0 14px">Scegli le materie: vedrai solo quelle. Puoi cambiarle quando vuoi dalle impostazioni.</p><div class="subjpick">';
+  SUBJECTS.forEach(k=>{const on=sel.includes(k);h+='<button class="sp'+(on?" on":"")+'" data-a="pksubj" data-s="'+k+'" aria-pressed="'+on+'"><b>'+esc(SUBJ[k].name)+'</b><span>'+SUBJ[k].ch.length+' capitoli</span><i>'+(on?"✓":"")+'</i></button>'});
+  h+='</div><div class="next"><button class="btn primary" data-a="savesubj" '+(sel.length?"":"disabled")+'>Inizia a studiare</button></div></section>';
+  return authShell(h)}
+async function afterLogin(user){
+  CL.user=user;
+  const [pr,pg]=await Promise.all([SB.from("profiles").select("*").eq("id",user.id).maybeSingle(),SB.from("progress").select("state").eq("user_id",user.id).maybeSingle()]);
+  CL.profile=pr.data||{id:user.id,subjects:[],name:"",is_admin:false};
+  const remote=pg.data&&pg.data.state&&Object.keys(pg.data.state).length?pg.data.state:null;
+  if(remote&&(S.uid!==user.id||(remote.updatedAt||0)>(S.updatedAt||0)))S=Object.assign(base(),remote);
+  else if(!remote&&S.uid&&S.uid!==user.id)S=base();
+  S.uid=user.id;
+  if(CL.profile.name)S.name=CL.profile.name;else if(S.name)SB.from("profiles").update({name:S.name}).eq("id",user.id).then(()=>{});
+  if(!mySubj().includes(V.subj))V.subj=mySubj()[0];
+  CL.pickSubj=null;CL.ready=true;CL.err="";CL.info="";
+  save();cloudPush(true);checkStreak();render()}
+function authErr(e){const m=(e&&e.message)||"";
+  if(/invalid login/i.test(m))return "Email o password non corretti.";
+  if(/not confirmed/i.test(m))return "Devi prima confermare l’email: apri il link che ti abbiamo mandato.";
+  if(/already registered|already exists/i.test(m))return "Esiste già un account con questa email: usa Accedi.";
+  if(/password/i.test(m)&&/6/.test(m))return "La password deve avere almeno 6 caratteri.";
+  if(/rate limit/i.test(m))return "Troppi tentativi: aspetta qualche minuto.";
+  return m||"Qualcosa non ha funzionato. Riprova."}
+function fv(id){return((document.getElementById(id)||{}).value||"").trim()}
+async function auDo(kind){
+  const em=fv("au_em"),pw=(document.getElementById("au_pw")||{}).value||"",nmv=fv("au_nm");
+  if(kind!=="forgot"&&(!em||pw.length<6)){CL.err=!em?"Scrivi la tua email.":"La password deve avere almeno 6 caratteri.";render();return}
+  if(kind==="forgot"&&!em){CL.err="Scrivi la tua email qui sopra, poi tocca di nuovo “Password dimenticata?”.";render();return}
+  CL.busy=true;CL.err="";CL.info="";render();
+  try{
+    if(kind==="login"){const{data,error}=await SB.auth.signInWithPassword({email:em,password:pw});if(error)throw error;CL.busy=false;await afterLogin(data.user);return}
+    if(kind==="signup"){const{data,error}=await SB.auth.signUp({email:em,password:pw,options:{data:{name:nmv},emailRedirectTo:location.origin+location.pathname}});if(error)throw error;
+      if(nmv)S.name=nmv;
+      if(data.session){CL.busy=false;await afterLogin(data.user);return}
+      CL.mode="login";CL.info="Account creato. Ti abbiamo mandato un’email: apri il link per confermarla, poi accedi."}
+    if(kind==="forgot"){const{error}=await SB.auth.resetPasswordForEmail(em,{redirectTo:location.origin+location.pathname});if(error)throw error;CL.info="Ti abbiamo mandato un’email con il link per scegliere una nuova password."}
+  }catch(e){CL.err=authErr(e)}
+  CL.busy=false;render()}
+async function saveSubjects(){
+  const sel=SUBJECTS.filter(k=>(CL.pickSubj||mySubj()).includes(k));if(!sel.length){toast("Scegli almeno una materia");return}
+  CL.profile=Object.assign({},CL.profile,{subjects:sel});CL.pickSubj=null;
+  if(!sel.includes(V.subj)){V.subj=sel[0];S.lastSubj=V.subj;save()}
+  const{error}=await SB.from("profiles").update({subjects:sel,updated_at:new Date().toISOString()}).eq("id",CL.user.id);
+  toast(error?"Salvato su questo dispositivo, ma non nel tuo account":"Materie salvate");V.firstHome=true;go("home")}
+
+/* dashboard admin */
+async function adminLoad(){
+  CL.admin={loading:true};render();
+  const since=new Date(Date.now()-90*864e5).toISOString();
+  const [p,g,q,o]=await Promise.all([SB.from("profiles").select("id,email,name,subjects,is_admin,created_at"),SB.from("progress").select("user_id,xp,level,streak,updated_at,state"),SB.from("quiz_results").select("user_id,subj,chapter,kind,score,total,created_at").gte("created_at",since).order("created_at",{ascending:false}).limit(5000),SB.from("oral_exams").select("user_id,subj,ambito,voto,lode,giudizio,created_at").order("created_at",{ascending:false}).limit(1000)]);
+  const err=[p,g,q,o].find(x=>x.error);
+  CL.admin=err?{error:err.error.message}:{profiles:p.data,progress:g.data,quiz:q.data,orali:o.data};render()}
+function ago(iso){if(!iso)return "mai";const d=Math.floor((Date.now()-new Date(iso))/864e5);return d<=0?"oggi":d===1?"ieri":d+" giorni fa"}
+function pct(a,b){return b?Math.round(a/b*100):0}
+function adminRows(){const A=CL.admin;const pg={};A.progress.forEach(x=>pg[x.user_id]=x);const wk=Date.now()-7*864e5;
+  return A.profiles.map(pr=>{const g=pg[pr.id]||{};const qz=A.quiz.filter(x=>x.user_id===pr.id);const or=A.orali.filter(x=>x.user_id===pr.id);
+    const qq=qz.filter(x=>x.kind==="quiz"||x.kind==="Sfida mista");const sc=qq.reduce((a,x)=>a+x.score,0),tt=qq.reduce((a,x)=>a+x.total,0);
+    const voti=or.filter(x=>x.voto!=null);const media=voti.length?(voti.reduce((a,x)=>a+x.voto,0)/voti.length):null;
+    const last=[g.updated_at,qz[0]&&qz[0].created_at,or[0]&&or[0].created_at].filter(Boolean).sort().pop();
+    return{pr,g,qz,or,quizPct:tt?pct(sc,tt):null,quizN:qq.length,week:qz.filter(x=>new Date(x.created_at)>wk).length,media,last}}).sort((a,b)=>String(b.last||"").localeCompare(String(a.last||"")))}
+function adminView(){
+  let h=topbar('<button class="back" data-a="settings">‹ Impostazioni</button>');
+  h+='<main class="wrap"><div class="chead"><div><div class="n">Area admin</div><h2>Come stanno andando gli studenti</h2><div class="s">Dati degli ultimi 90 giorni per i quiz, tutte le interrogazioni.</div></div><button class="btn small" data-a="admin">Aggiorna</button></div>';
+  const A=CL.admin;
+  if(!A||A.loading)return h+'<section class="panel"><p class="muted" style="margin:0">Carico i dati…</p></section></main>';
+  if(A.error)return h+'<section class="panel"><p class="status ko" style="margin:0">'+esc(A.error)+'</p></section></main>';
+  const rows=adminRows();
+  if(CL.adminSel){const r=rows.find(x=>x.pr.id===CL.adminSel);if(r)return h+adminDetail(r)+'</main>'}
+  const act7=rows.filter(r=>r.last&&Date.now()-new Date(r.last)<7*864e5).length;
+  const allOr=A.orali.filter(x=>x.voto!=null);
+  h+='<div class="kpis"><div class="kpi"><b>'+rows.length+'</b><span>Studenti</span></div><div class="kpi"><b>'+act7+'</b><span>Attivi negli ultimi 7 giorni</span></div><div class="kpi"><b>'+A.quiz.length+'</b><span>Sessioni di esercizio</span></div><div class="kpi"><b>'+(allOr.length?(allOr.reduce((a,x)=>a+x.voto,0)/allOr.length).toFixed(1):"–")+'</b><span>Voto medio orali ('+allOr.length+')</span></div></div>';
+  h+='<section class="panel"><h3>Studenti</h3><div class="tblw"><table class="tbl"><thead><tr><th>Studente</th><th>Materie</th><th class="r">Livello</th><th class="r">XP</th><th class="r">Serie</th><th class="r">Quiz giusti</th><th class="r">Sessioni 7g</th><th class="r">Media orali</th><th>Ultima attività</th></tr></thead><tbody>';
+  rows.forEach(r=>{h+='<tr data-a="adminsel" data-id="'+r.pr.id+'" tabindex="0"><td><b>'+esc(r.pr.name||"–")+'</b><br><span class="muted">'+esc(r.pr.email||"")+'</span></td><td>'+(r.pr.subjects||[]).map(k=>SUBJ[k]?esc(SUBJ[k].short):k).join(", ")+'</td><td class="r">'+(r.g.level||1)+'</td><td class="r">'+(r.g.xp||0)+'</td><td class="r">'+(r.g.streak||0)+'</td><td class="r">'+(r.quizPct==null?"–":r.quizPct+"%")+'</td><td class="r">'+r.week+'</td><td class="r">'+(r.media==null?"–":r.media.toFixed(1))+'</td><td>'+ago(r.last)+'</td></tr>'});
+  h+='</tbody></table></div><p class="muted" style="margin:10px 0 0;font-size:.9rem">Tocca uno studente per vedere capitoli deboli, quiz e interrogazioni.</p></section>';
+  return h+'</main>'}
+function adminDetail(r){
+  const st=(r.g.state)||{};let h='<button class="btn small" data-a="adminback" style="margin-bottom:12px">‹ Tutti gli studenti</button>';
+  h+='<section class="panel"><h3>'+esc(r.pr.name||r.pr.email)+'</h3><p class="muted" style="margin:0">'+esc(r.pr.email||"")+' · iscritto '+ago(r.pr.created_at)+' · ultima attività '+ago(r.last)+'</p><div class="kpis" style="margin-top:14px"><div class="kpi"><b>'+(r.g.level||1)+'</b><span>Livello ('+(r.g.xp||0)+' XP)</span></div><div class="kpi"><b>'+(r.g.streak||0)+'</b><span>Serie di giorni</span></div><div class="kpi"><b>'+(r.quizPct==null?"–":r.quizPct+"%")+'</b><span>Risposte giuste nei quiz</span></div><div class="kpi"><b>'+(r.media==null?"–":r.media.toFixed(1))+'</b><span>Media orali</span></div></div></section>';
+  (r.pr.subjects&&r.pr.subjects.length?r.pr.subjects:SUBJECTS).filter(k=>SUBJ[k]).forEach(sk=>{
+    const ch=SUBJ[sk].ch.map(c=>{const q=r.qz.filter(x=>x.subj===sk&&x.chapter===c.id);const sc=q.reduce((a,x)=>a+x.score,0),tt=q.reduce((a,x)=>a+x.total,0);
+      const ids=Object.keys(IDX).filter(k=>IDX[k].ch===c.key);const seen=ids.filter(k=>st.stats&&st.stats[k]).length;const errs=ids.filter(k=>st.err&&st.err[k]).length;
+      return{c,n:q.length,p:tt?pct(sc,tt):null,cov:pct(seen,ids.length),errs}});
+    h+='<section class="panel"><h3>'+esc(SUBJ[sk].name)+'</h3><div class="tblw"><table class="tbl"><thead><tr><th>Capitolo</th><th class="r">Esercizi visti</th><th class="r">Sessioni</th><th class="r">Giuste</th><th class="r">Errori aperti</th></tr></thead><tbody>'+
+      ch.map(x=>'<tr><td>'+x.c.id+'. '+esc(x.c.t)+'</td><td class="r">'+x.cov+'%</td><td class="r">'+x.n+'</td><td class="r'+(x.p!=null&&x.p<60?" bad":"")+'">'+(x.p==null?"–":x.p+"%")+'</td><td class="r'+(x.errs>=5?" bad":"")+'">'+x.errs+'</td></tr>').join("")+'</tbody></table></div></section>'});
+  h+='<section class="panel"><h3>Interrogazioni</h3>'+(r.or.length?r.or.slice(0,20).map(o=>'<div class="erow"><span class="x" style="min-width:54px;background:'+(o.voto>=18?"var(--ok-soft);color:var(--ok)":"var(--saf-soft)")+'">'+(o.voto==null?"–":o.voto<18?"✗":o.voto+(o.lode?"L":""))+'</span><div class="tx">'+esc(o.ambito||"")+'<div class="tp">'+ago(o.created_at)+(o.giudizio?" · "+esc(o.giudizio):"")+'</div></div></div>').join(""):'<p class="muted" style="margin:0">Nessuna interrogazione.</p>')+'</section>';
+  h+='<section class="panel"><h3>Ultime sessioni</h3>'+(r.qz.length?r.qz.slice(0,25).map(x=>'<div class="erow"><span class="x" style="min-width:54px">'+x.score+'/'+x.total+'</span><div class="tx">'+(SUBJ[x.subj]?esc(SUBJ[x.subj].short):x.subj)+(x.chapter?", cap. "+x.chapter:"")+' · '+esc(x.kind)+'<div class="tp">'+ago(x.created_at)+'</div></div></div>').join(""):'<p class="muted" style="margin:0">Nessuna sessione registrata.</p>')+'</section>';
+  return h}
+async function boot(){
+  if(!SB){checkStreak();render();return}
+  SB.auth.onAuthStateChange((ev)=>{if(ev==="PASSWORD_RECOVERY"){CL.recovery=true;CL.ready=true;render()}if(ev==="SIGNED_OUT"){CL.user=null;CL.profile=null;CL.admin=null;render()}});
+  let session=null;try{session=(await SB.auth.getSession()).data.session}catch(e){}
+  if(session&&!CL.recovery){try{await afterLogin(session.user);return}catch(e){console.warn(e)}}
+  CL.ready=true;render()}
+document.addEventListener("visibilitychange",()=>{if(document.visibilityState==="hidden")cloudPush(true)});
 
 /* ---------- render & events ---------- */
 function render(){
-  const f={home,chapter:chapterView,errors:errorsView,run:runScreen,plan:planView,rewards:rewardsView,settings:settingsView,orale:oraleView}[V.view];
+  let f;
+  if(SB&&!CL.ready)f=loadingView;else if(SB&&(!CL.user||CL.recovery))f=authView;else if(SB&&!((CL.profile&&CL.profile.subjects)||[]).length){if(!CL.pickSubj)CL.pickSubj=[];f=onboardView}
+  else f={home,chapter:chapterView,errors:errorsView,run:runScreen,plan:planView,rewards:rewardsView,settings:settingsView,orale:oraleView,admin:adminView}[V.view];
   $app.innerHTML=f();
   const gi=document.getElementById("gapin");if(gi){gi.focus({preventScroll:true});gi.addEventListener("keydown",e=>{if(e.key==="Enter")act("gapcheck")})}
   flush()}
@@ -444,12 +567,13 @@ function act(a,el){
       const sg=suggestedGoal(sk);if(sg)S.goal=sg;save();toast("Piano creato. Obiettivo: "+S.goal+" XP al giorno");render();break}
     case "clearexam":delete S.exam[V.subj];delete S.today[V.subj];delete S.planStart[V.subj];save();go("home");break;
     case "goal":{S.goal=+el.dataset.x;const t=today();if((S.days[t]||0)>=S.goal&&!S.goalDays[t]){S.goalDays[t]=1;goalReached()}save();render();break}
-    case "setname":{const v=(document.getElementById("nm")||{}).value||"";S.name=v.trim().slice(0,30);save();toast("Salvato");render();break}
+    case "setname":{const v=(document.getElementById("nm")||{}).value||"";S.name=v.trim().slice(0,30);save();if(SB&&CL.user)SB.from("profiles").update({name:S.name,updated_at:new Date().toISOString()}).eq("id",CL.user.id).then(()=>{});toast("Salvato");render();break}
     case "bkcopy":{const c=bkCode();const ok=()=>{S.lastBackup=today();save();render();toast("Codice copiato: incollalo nelle Note o mandalo in chat")};if(navigator.clipboard&&navigator.clipboard.writeText)navigator.clipboard.writeText(c).then(ok,()=>fallbackCopy(c,ok));else fallbackCopy(c,ok);break}
     case "bkdown":{const b=new Blob([bkCode()],{type:"text/plain"});const l=document.createElement("a");l.href=URL.createObjectURL(b);l.download="coltura-backup-"+today()+".txt";document.body.appendChild(l);l.click();l.remove();S.lastBackup=today();save();toast("File di backup creato");break}
     case "bkimport":bkRestore((document.getElementById("bkin")||{}).value||"");break;
     case "orale":OR.status="setup";OR.err="";go("orale");break;
     case "orch":{const k=el.dataset.ch;const s=orSel();if(s[k])delete s[k];else s[k]=1;orRefresh();break}
+    case "orsubj":OR.subj=el.dataset.s;orRefresh();break;
     case "orall":{const s=orSel();SUBJ[el.dataset.s].ch.forEach(c=>s[c.key]=1);orRefresh();break}
     case "ornone":{const s=orSel();SUBJ[el.dataset.s].ch.forEach(c=>delete s[c.key]);orRefresh();break}
     case "ornum":OR.num=+el.dataset.x;orRefresh();break;
@@ -457,11 +581,22 @@ function act(a,el){
     case "orstart":oraleStart();break;
     case "orstop":oraleStop(false);break;
     case "ornew":OR.status="setup";OR.log=[];OR.result=null;render();window.scrollTo(0,0);break;
+    case "aumode":CL.mode=el.dataset.x;CL.err="";CL.info="";render();break;
+    case "aulogin":auDo("login");break;
+    case "ausignup":auDo("signup");break;
+    case "auforgot":auDo("forgot");break;
+    case "aunewpw":{const pw=(document.getElementById("au_pw")||{}).value||"";if(pw.length<6){CL.err="Almeno 6 caratteri.";render();return}CL.busy=true;render();SB.auth.updateUser({password:pw}).then(async({data,error})=>{CL.busy=false;if(error){CL.err=authErr(error);render();return}CL.recovery=false;toast("Password aggiornata");await afterLogin(data.user)});break}
+    case "pksubj":{const k=el.dataset.s;const l=(CL.pickSubj||mySubj()).slice();const i=l.indexOf(k);if(i>=0)l.splice(i,1);else l.push(k);CL.pickSubj=l;render();break}
+    case "savesubj":saveSubjects();break;
+    case "logout":if(confirm("Uscire dall’account su questo dispositivo?")){cloudPush(true);setTimeout(()=>SB.auth.signOut(),300)}break;
+    case "admin":CL.adminSel=null;V.view="admin";adminLoad();window.scrollTo(0,0);break;
+    case "adminsel":CL.adminSel=el.dataset.id;render();window.scrollTo(0,0);break;
+    case "adminback":CL.adminSel=null;render();break;
     case "reset":if(confirm("Azzerare XP, serie, badge, errori e piani? L’operazione non si può annullare.")){const n=S.name;S=base();S.name=n;save();go("home");toast("Progressi azzerati")}break;
   }
 }
 document.addEventListener("click",e=>{const el=e.target.closest("[data-a]");if(!el||el.disabled)return;act(el.dataset.a,el)});
 document.addEventListener("change",e=>{if(e.target.id!=="bkfile"||!e.target.files[0])return;const fr=new FileReader();fr.onload=()=>bkRestore(fr.result);fr.readAsText(e.target.files[0]);e.target.value=""});
-document.addEventListener("keydown",e=>{if((e.key==="Enter"||e.key===" ")&&e.target.matches('[data-a="flip"],[data-a="rev"]')){e.preventDefault();act(e.target.dataset.a,e.target)}});
-checkStreak();render();
+document.addEventListener("keydown",e=>{if(e.key==="Enter"&&e.target.closest&&e.target.closest("#auform")){e.preventDefault();act(CL.mode==="signup"?"ausignup":"aulogin");return}if((e.key==="Enter"||e.key===" ")&&e.target.matches('[data-a="flip"],[data-a="rev"]')){e.preventDefault();act(e.target.dataset.a,e.target)}});
+boot();
 })();
