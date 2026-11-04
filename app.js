@@ -364,7 +364,7 @@ function orRefresh(){if(V.view!=="orale")return;const y=window.scrollY;render();
 function orTick(){const el=document.getElementById("ortime");if(!el||!OR.started)return;const s=Math.floor((Date.now()-OR.started)/1000);el.textContent=Math.floor(s/60)+":"+String(s%60).padStart(2,"0")+" di 20:00"}
 async function oraleStart(){
   const keys=orKeys();if(!keys.length)return;
-  OR.status="connecting";OR.err="";OR.log=[];OR.result=null;OR.mode="";render();window.scrollTo(0,0);
+  OR.status="connecting";OR.err="";OR.lastErr="";OR.log=[];OR.result=null;OR.mode="";render();window.scrollTo(0,0);
   const ambito=orAmbito(keys);
   try{
     await navigator.mediaDevices.getUserMedia({audio:true}).then(st=>st.getTracks().forEach(t=>t.stop()));
@@ -376,8 +376,11 @@ async function oraleStart(){
       onConnect:()=>{OR.status="live";OR.started=Date.now();clearInterval(OR.timer);OR.timer=setInterval(orTick,1000);orRefresh()},
       onModeChange:({mode})=>{OR.mode=mode;const l=document.getElementById("orlab");const o=document.querySelector(".orb");if(l)l.textContent=mode==="speaking"?"Il professore parla":"Ti ascolto";if(o)o.classList.toggle("talk",mode==="speaking")},
       onMessage:(m)=>{const t=(m.message||"").replace(/\[[^\]]{1,24}\]\s*/g,"").trim();if(!t)return;OR.log.push({r:(m.role||m.source)==="user"?"user":"ai",t});orRefresh()},
-      onError:(e)=>{console.warn("ElevenLabs:",e)},
-      onDisconnect:()=>{clearInterval(OR.timer);OR.conv=null;if(OR.status!=="setup"){OR.status="result";orRefresh()}}
+      onError:(e,ctx)=>{console.warn("ElevenLabs:",e,ctx);OR.lastErr=String(e||"")+" "+JSON.stringify(ctx||"")},
+      onDisconnect:(d)=>{clearInterval(OR.timer);OR.conv=null;if(OR.status==="setup")return;
+        const why=((d&&(d.message||d.closeReason))||"")+" "+(OR.lastErr||"");
+        if(!OR.result&&!OR.log.some(m=>m.r==="user")&&!OR.log.length){OR.status="setup";OR.err=/quota|credit/i.test(why)?"Il professore non è disponibile: sono finiti i crediti ElevenLabs. Riprova quando si rinnovano o dopo aver cambiato piano.":"Il professore non ha risposto. Riprova tra qualche minuto.";orRefresh();return}
+        OR.status="result";orRefresh()}
     });
   }catch(e){
     console.warn(e);OR.conv=null;OR.status="setup";
