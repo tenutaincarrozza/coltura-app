@@ -43,6 +43,8 @@ function nm(){return esc(S.name||"")}
 
 /* ---------- content index ---------- */
 const IDX={},CH={};
+if(typeof QX!=="undefined")SUBJECTS.forEach(sk=>SUBJ[sk].ch.forEach(c=>{const x=QX[sk+":"+c.id];if(x)c.mcq=c.mcq.concat(x)}));
+const QUIZ_N=10;
 SUBJECTS.forEach(sk=>SUBJ[sk].ch.forEach(c=>{
   c.subj=sk;c.key=sk+":"+c.id;CH[c.key]=c;const p=c.key;
   c.mcq.forEach((d,i)=>IDX[p+"-q"+i]={id:p+"-q"+i,type:"q",ch:p,d});
@@ -277,7 +279,7 @@ function newRun(list,title,back){V.run={items:list,i:0,res:[],title,state:{},com
 function prepItem(){const r=V.run;const it=r.items[r.i];r.state={};if(!it)return;
   if(it.type==="q")r.state.order=shuffle(it.d[1].map((_,k)=>k));
   if(it.type==="m"){r.state.right=shuffle(it.d.map((_,k)=>k));r.state.found={};r.state.sel=null;r.state.miss=0}}
-function tabRun(c,tab){if(tab==="flash")return items(c.key,"f");if(tab==="quiz")return shuffle(items(c.key,"q"));if(tab==="eserc")return items(c.key,"g").concat(items(c.key,"m"));if(tab==="aperte")return items(c.key,"o");return[]}
+function tabRun(c,tab){if(tab==="flash")return items(c.key,"f");if(tab==="quiz")return shuffle(items(c.key,"q")).slice(0,QUIZ_N);if(tab==="eserc")return items(c.key,"g").concat(items(c.key,"m"));if(tab==="aperte")return items(c.key,"o");return[]}
 function nextBtn(){const r=V.run;return '<div class="next"><button class="btn primary" data-a="next">'+(r.i+1<r.items.length?"Avanti":"Vedi il risultato")+'</button></div>'}
 function runnerView(){
   const r=V.run;if(!r)return "";if(r.i>=r.items.length)return runEnd();
@@ -287,7 +289,7 @@ function runnerView(){
   const d=it.d;
   if(it.type==="q"){h+='<p class="q">'+esc(d[0])+'</p><div class="opts">';
     st.order.forEach(k=>{let cls="";if(st.pick!=null){if(k===d[2])cls=" ok";else if(k===st.pick)cls=" ko"}h+='<button class="opt'+cls+'" data-a="pick" data-k="'+k+'" '+(st.pick!=null?"disabled":"")+'>'+esc(d[1][k])+'</button>'});
-    h+='</div>';if(st.pick!=null){const ok=st.pick===d[2];h+='<div class="feedback '+(ok?"ok":"ko")+'"><b>'+(ok?"Esatto. ":"Non proprio. ")+'</b>'+esc(d[3]||"")+'</div>'+nextBtn()}}
+    h+='</div>';if(st.pick!=null){const ok=st.pick===d[2];h+='<div class="feedback '+(ok?"ok":"ko")+'"><b>'+(ok?"Esatto!":"Sbagliato. La risposta giusta è: "+esc(d[1][d[2]]))+'</b>'+(d[3]?'<br>'+esc(d[3]):'')+'</div>'+nextBtn()}}
   else if(it.type==="g"){h+='<p class="q">'+esc(d[0])+'</p>';
     if(st.ans==null)h+='<input class="gap" id="gapin" autocomplete="off" autocapitalize="off" spellcheck="false" placeholder="Scrivi la parola mancante"><div class="next"><button class="btn" data-a="gapskip">Non lo so</button><button class="btn primary" data-a="gapcheck">Verifica</button></div>';
     else h+='<div class="feedback '+(st.ok?"ok":"ko")+'"><b>'+(st.ok?"Corretto: ":"Risposta corretta: ")+'</b>'+esc(d[1])+(st.ok||!st.ans?"":'<br><span class="muted">Hai scritto: '+esc(st.ans)+'</span>')+'</div>'+nextBtn()}
@@ -313,7 +315,7 @@ function runEnd(){const r=V.run;const ok=r.res.filter(x=>x==="ok").length;const 
   const msg=ok===tot?"Piastra pulita, "+nm()+": nessun errore!":ok/tot>=.7?"Ottimo lavoro, "+nm()+". Gli errori sono nella lista da rivedere.":"Rileggi la parte di studio e riprova: gli errori sono salvati.";
   let h='<div class="qcard" style="text-align:center"><p class="muted" style="margin:0">'+esc(r.title)+'</p><h3 style="font-size:2.6rem;margin:6px 0;letter-spacing:-.03em">'+ok+' / '+tot+'</h3><p>'+msg+'</p><p class="muted">+'+r.xp+' XP in questa sessione, '+(S.days[today()]||0)+' di '+S.goal+' XP oggi</p><div class="next" style="justify-content:center">';
   if(ok<tot)h+='<button class="btn" data-a="retrywrong">Rifai solo le sbagliate</button>';
-  if(V.view==="chapter"){const nx={flash:"quiz",quiz:"eserc",eserc:"aperte",aperte:"recap"}[V.tab];h+='<button class="btn" data-a="restart">Ricomincia</button><button class="btn primary" data-a="tab" data-t="'+nx+'">'+(nx==="recap"?"Vai al recap":"Continua: "+TABTITLE[nx])+'</button>'}
+  if(V.view==="chapter"){const nx={flash:"quiz",quiz:"eserc",eserc:"aperte",aperte:"recap"}[V.tab];h+='<button class="btn" data-a="restart">'+(V.tab==="quiz"?"Nuovo quiz: altre 10 domande":"Ricomincia")+'</button><button class="btn primary" data-a="tab" data-t="'+nx+'">'+(nx==="recap"?"Vai al recap":"Continua: "+TABTITLE[nx])+'</button>'}
   else h+='<button class="btn primary" data-a="home">Torna alla home</button>';
   return h+'</div></div>'}
 function runScreen(){return topbar('<button class="back" data-a="'+(V.run&&V.run.back?"backrun":"home")+'">‹ Esci</button>')+'<main class="wrap"><div class="narrow" style="padding-top:22px">'+runnerView()+'</div></main>'}
