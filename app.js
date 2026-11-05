@@ -509,8 +509,13 @@ function adminDetail(r){
 async function boot(){
   if(!SB){checkStreak();render();return}
   SB.auth.onAuthStateChange((ev)=>{if(ev==="PASSWORD_RECOVERY"){CL.recovery=true;CL.ready=true;render()}if(ev==="SIGNED_OUT"){CL.user=null;CL.profile=null;CL.admin=null;render()}});
+  const lp=new URLSearchParams((location.hash||"").replace(/^#/,"")+"&"+(location.search||"").replace(/^\?/,""));
+  const lpType=lp.get("type"),lpErr=lp.get("error_description")||lp.get("error");
   let session=null;try{session=(await SB.auth.getSession()).data.session}catch(e){}
-  if(session&&!CL.recovery){try{await afterLogin(session.user);return}catch(e){console.warn(e)}}
+  if(lpType||lpErr||lp.get("code")){try{history.replaceState(null,"",location.pathname)}catch(e){}}
+  if(lpErr){CL.mode="login";CL.err=/expired|scadut|invalid/i.test(lpErr)?"Il link di conferma è scaduto o è già stato usato. Prova ad accedere: se l’email non risulta confermata, registrati di nuovo per ricevere un nuovo link.":"Conferma non riuscita: "+lpErr.replace(/\+/g," ")}
+  if(session&&!CL.recovery){try{await afterLogin(session.user);if(lpType==="signup"||lpType==="email")toast("Email confermata, benvenuta!");return}catch(e){console.warn(e)}}
+  if(lpType==="signup"&&!lpErr){CL.mode="login";CL.info="Email confermata! Ora accedi con email e password."}
   CL.ready=true;render()}
 document.addEventListener("visibilitychange",()=>{if(document.visibilityState==="hidden")cloudPush(true)});
 
