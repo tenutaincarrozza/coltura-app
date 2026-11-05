@@ -50,6 +50,9 @@ function nm(){return esc(S.name||"")}
 /* ---------- content index ---------- */
 const IDX={},CH={};
 if(typeof QX!=="undefined")SUBJECTS.forEach(sk=>SUBJ[sk].ch.forEach(c=>{const x=QX[sk+":"+c.id];if(x)c.mcq=c.mcq.concat(x)}));
+/* approfondimenti: flashcard, frasi, abbinamenti e domande in più (sempre in coda, così gli id restano validi) */
+if(typeof AX!=="undefined")SUBJECTS.forEach(sk=>SUBJ[sk].ch.forEach(c=>{const x=AX[sk+":"+c.id];if(!x)return;
+  ["fc","gap","mcq","open","recap"].forEach(f=>{if(x[f])c[f]=(c[f]||[]).concat(x[f])});if(x.match)c.matchX=(c.matchX||[]).concat(x.match)}));
 const QUIZ_N=10;
 SUBJECTS.forEach(sk=>SUBJ[sk].ch.forEach(c=>{
   c.subj=sk;c.key=sk+":"+c.id;CH[c.key]=c;const p=c.key;
@@ -58,6 +61,7 @@ SUBJECTS.forEach(sk=>SUBJ[sk].ch.forEach(c=>{
   c.open.forEach((d,i)=>IDX[p+"-o"+i]={id:p+"-o"+i,type:"o",ch:p,d});
   c.fc.forEach((d,i)=>IDX[p+"-f"+i]={id:p+"-f"+i,type:"f",ch:p,d});
   IDX[p+"-m"]={id:p+"-m",type:"m",ch:p,d:c.match};
+  for(let i=0;c.matchX&&i*5<c.matchX.length;i++){const set=c.matchX.slice(i*5,i*5+5);if(set.length>=3)IDX[p+"-m"+(i+1)]={id:p+"-m"+(i+1),type:"m",ch:p,d:set}}
 }));
 const ALL=Object.values(IDX);
 function items(ck,type){return ALL.filter(x=>x.ch===ck&&x.type===type)}
