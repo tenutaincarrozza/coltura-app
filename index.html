@@ -245,6 +245,16 @@ textarea{min-height:140px;resize:vertical}
 .fl{display:block;font-weight:600;margin:0 0 12px}.fl input{display:block;width:100%;margin-top:6px;padding:12px 14px;border-radius:12px;border:1.5px solid var(--line);background:var(--bg);color:var(--ink);font:inherit;font-weight:400}
 .fl input:focus{outline:2px solid var(--gram);outline-offset:1px}
 .linkbtn{color:var(--gram);font-weight:600;text-decoration:underline;padding:0}
+.subjgrid{display:grid;grid-template-columns:repeat(auto-fill,minmax(260px,1fr));gap:14px;margin-top:8px}
+.subjcard{display:flex;flex-direction:column;align-items:flex-start;gap:8px;text-align:left;background:var(--surface);border:1px solid var(--line);border-radius:22px;padding:20px;transition:transform .15s,border-color .15s}
+.subjcard:hover{transform:translateY(-2px);border-color:var(--ink)}
+.subjcard.last{border-color:var(--agar)}
+.subjcard .sic{font-size:1.8rem;line-height:1}
+.subjcard .sname{font-size:1.25rem;font-weight:800;letter-spacing:-.01em}
+.subjcard .smeta{color:var(--muted);font-size:.9rem}
+.subjcard .bar{width:100%}
+.subjcard .sfoot{display:flex;width:100%;align-items:center;justify-content:space-between;gap:8px;margin-top:4px}
+.subjcard .go{font-weight:700}
 .segw{display:flex;flex-wrap:wrap;max-width:100%}.segw button{flex:1 1 auto}
 .subjpick{display:grid;gap:10px}
 .sp{display:grid;grid-template-columns:1fr auto;align-items:center;text-align:left;padding:14px 16px;border-radius:16px;border:1.5px solid var(--line);background:var(--bg)}

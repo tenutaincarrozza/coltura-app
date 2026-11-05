@@ -161,8 +161,22 @@ function plate(ck,cls){const m=mastery(ck);return '<svg viewBox="0 0 100 100" cl
 /* ---------- top bar ---------- */
 function topbar(left){
   const e=errKeys().length;
-  return '<header class="top"><div class="wrap">'+left+'<span class="spacer"></span><button class="pill" data-a="rewards" title="Serie di giorni con obiettivo raggiunto">🔥 '+S.streak+'</button><span class="pill hide-s">'+S.xp+' XP</span><button class="pill'+(e?" err":"")+'" data-a="errors">'+e+'<span class="hide-s">&nbsp;da rivedere</span></button><button class="pill" data-a="settings" aria-label="Impostazioni">⚙︎</button></div></header>'}
+  const hub=mySubj().length>1&&V.view!=="hub"?'<button class="pill hubbtn" data-a="hub" aria-label="Le tue materie">📚<span class="hide-s">&nbsp;Materie</span></button>':'';
+  return '<header class="top"><div class="wrap">'+left+'<span class="spacer"></span>'+hub+'<button class="pill" data-a="rewards" title="Serie di giorni con obiettivo raggiunto">🔥 '+S.streak+'</button><span class="pill hide-s">'+S.xp+' XP</span><button class="pill'+(e?" err":"")+'" data-a="errors">'+e+'<span class="hide-s">&nbsp;da rivedere</span></button><button class="pill" data-a="settings" aria-label="Impostazioni">⚙︎</button></div></header>'}
 function segSubj(){const l=mySubj();if(l.length<2)return '';return '<div class="seg segw" role="group" aria-label="Materia">'+l.map(k=>'<button aria-pressed="'+(V.subj===k)+'" data-a="subj" data-s="'+k+'">'+esc(SUBJ[k].short)+'</button>').join("")+'</div>'}
+
+/* ---------- hub: tutte le materie ---------- */
+function subjStats(k){const ch=SUBJ[k].ch;const m=ch.length?ch.reduce((a,c)=>a+mastery(c.key),0)/ch.length:0;const done=ch.filter(c=>mastery(c.key)>=.8).length;const pl=S.exam[k]?plan(k):null;return{m,done,n:ch.length,err:errKeys(k).length,pl}}
+function hubView(){
+  const L=lvl(S.xp);
+  let h=topbar('<span class="brand">Coltura</span>');
+  h+='<main class="wrap"><section class="hero"><div><p class="hello">'+greet()+' 👋</p><h1>Le tue<br>materie</h1><p>Scegli cosa studiare oggi. Puoi tornare qui in qualsiasi momento dal pulsante 📚 in alto.</p></div>';
+  h+='<div class="level"><div class="sub">Livello '+(L.i+1)+' di '+LEVELS.length+'</div><div class="name">'+esc(L.name)+'</div><div class="bar"><i style="width:'+L.pct.toFixed(0)+'%"></i></div><div class="sub">🔥 '+S.streak+' '+(S.streak===1?"giorno":"giorni")+' di fila · '+S.xp+' XP</div></div></section>';
+  h+='<div class="subjgrid">'+mySubj().map(k=>{const s=SUBJ[k],x=subjStats(k);
+    const ex=x.pl?(x.pl.past?'<span class="status mid">Esame: data passata</span>':'<span class="status '+(x.pl.D<=7?"ko":"ok")+'">Esame tra '+x.pl.D+(x.pl.D===1?" giorno":" giorni")+'</span>'):'<span class="muted" style="font-size:.88rem">Data d’esame non impostata</span>';
+    return '<button class="subjcard'+(k===V.subj?" last":"")+'" data-a="subj" data-s="'+k+'"><span class="sic" aria-hidden="true">'+(s.badge?s.badge[1]:"📘")+'</span><span class="sname">'+esc(s.name)+'</span><span class="smeta">'+x.done+' di '+x.n+' capitoli padroneggiati'+(x.err?' · '+x.err+' errori da rivedere':'')+'</span><span class="bar"><i style="width:'+Math.round(x.m*100)+'%"></i></span><span class="sfoot">'+ex+'<span class="go">Apri ›</span></span></button>'}).join("")+'</div>';
+  h+='<p class="muted" style="margin-top:24px;font-size:.9rem">Vuoi aggiungere o togliere una materia? <button class="linkbtn" data-a="settings">Vai alle impostazioni</button></p></main>';
+  return h}
 
 /* ---------- home ---------- */
 function greet(){const h=new Date().getHours();return(h<12?"Buongiorno":h<18?"Buon pomeriggio":"Buonasera")+(S.name?", "+nm():"")}
@@ -191,7 +205,7 @@ function home(){
   const L=lvl(S.xp);const s=SUBJ[V.subj];
   const grow=V.firstHome?" grow":"";V.firstHome=false;
   let h=topbar('<span class="brand">Coltura</span>');
-  h+='<main class="wrap"><section class="hero"><div><p class="hello">'+greet()+' 👋</p><h1>'+esc(s.name).replace(" ","<br>")+'</h1><div style="margin-top:16px">'+segSubj()+'</div></div>';
+  h+='<main class="wrap"><section class="hero"><div><p class="hello">'+greet()+' 👋</p><h1>'+esc(s.name).replace(" ","<br>")+'</h1>'+(mySubj().length>1?'<button class="linkbtn" style="margin-top:14px" data-a="hub">‹ Tutte le materie</button>':'')+'</div>';
   h+='<div class="level"><div class="sub">Livello '+(L.i+1)+' di '+LEVELS.length+'</div><div class="name">'+esc(L.name)+'</div><div class="bar"><i style="width:'+L.pct.toFixed(0)+'%"></i></div><div class="sub">'+(L.next?(STEP-S.xp%STEP)+" XP a "+esc(L.next):"Livello massimo raggiunto")+'</div></div></section>';
   h+='<div class="today">'+streakCard()+planCard(V.subj)+'</div>';
   h+='<div class="actions"><button class="btn primary" data-a="mix">Sfida mista: 10 domande</button><button class="btn" data-a="errors">Ripassa gli errori ('+errKeys(V.subj).length+')</button><button class="btn gram" data-a="orale">🎓 Interrogazione col professore</button></div>';
@@ -434,6 +448,7 @@ async function afterLogin(user){
   if(CL.profile.name)S.name=CL.profile.name;else if(S.name)SB.from("profiles").update({name:S.name}).eq("id",user.id).then(()=>{});
   if(!mySubj().includes(V.subj))V.subj=mySubj()[0];
   CL.pickSubj=null;CL.ready=true;CL.err="";CL.info="";
+  if(V.view==="home"&&mySubj().length>1)V.view="hub";
   save();cloudPush(true);checkStreak();render()}
 function authErr(e){const m=(e&&e.message)||"";
   if(/invalid login/i.test(m))return "Email o password non corretti.";
@@ -462,7 +477,7 @@ async function saveSubjects(){
   CL.profile=Object.assign({},CL.profile,{subjects:sel});CL.pickSubj=null;
   if(!sel.includes(V.subj)){V.subj=sel[0];S.lastSubj=V.subj;save()}
   const{error}=await SB.from("profiles").update({subjects:sel,updated_at:new Date().toISOString()}).eq("id",CL.user.id);
-  toast(error?"Salvato su questo dispositivo, ma non nel tuo account":"Materie salvate");V.firstHome=true;go("home")}
+  toast(error?"Salvato su questo dispositivo, ma non nel tuo account":"Materie salvate");V.firstHome=true;go(mySubj().length>1?"hub":"home")}
 
 /* dashboard admin */
 async function adminLoad(){
@@ -507,7 +522,7 @@ function adminDetail(r){
   h+='<section class="panel"><h3>Ultime sessioni</h3>'+(r.qz.length?r.qz.slice(0,25).map(x=>'<div class="erow"><span class="x" style="min-width:54px">'+x.score+'/'+x.total+'</span><div class="tx">'+(SUBJ[x.subj]?esc(SUBJ[x.subj].short):x.subj)+(x.chapter?", cap. "+x.chapter:"")+' · '+esc(x.kind)+'<div class="tp">'+ago(x.created_at)+'</div></div></div>').join(""):'<p class="muted" style="margin:0">Nessuna sessione registrata.</p>')+'</section>';
   return h}
 async function boot(){
-  if(!SB){checkStreak();render();return}
+  if(!SB){if(mySubj().length>1)V.view="hub";checkStreak();render();return}
   SB.auth.onAuthStateChange((ev)=>{if(ev==="PASSWORD_RECOVERY"){CL.recovery=true;CL.ready=true;render()}if(ev==="SIGNED_OUT"){CL.user=null;CL.profile=null;CL.admin=null;render()}});
   const lp=new URLSearchParams((location.hash||"").replace(/^#/,"")+"&"+(location.search||"").replace(/^\?/,""));
   const lpType=lp.get("type"),lpErr=lp.get("error_description")||lp.get("error");
@@ -523,7 +538,7 @@ document.addEventListener("visibilitychange",()=>{if(document.visibilityState===
 function render(){
   let f;
   if(SB&&!CL.ready)f=loadingView;else if(SB&&(!CL.user||CL.recovery))f=authView;else if(SB&&!((CL.profile&&CL.profile.subjects)||[]).length){if(!CL.pickSubj)CL.pickSubj=[];f=onboardView}
-  else f={home,chapter:chapterView,errors:errorsView,run:runScreen,plan:planView,rewards:rewardsView,settings:settingsView,orale:oraleView,admin:adminView}[V.view];
+  else f={home,chapter:chapterView,errors:errorsView,run:runScreen,plan:planView,rewards:rewardsView,settings:settingsView,orale:oraleView,admin:adminView,hub:hubView}[V.view]||home;
   $app.innerHTML=f();
   const gi=document.getElementById("gapin");if(gi){gi.focus({preventScroll:true});gi.addEventListener("keydown",e=>{if(e.key==="Enter")act("gapcheck")})}
   flush()}
@@ -539,8 +554,9 @@ function fallbackCopy(c,ok){const t=document.getElementById("bkin");if(!t){toast
 function act(a,el){
   const r=V.run;
   switch(a){
+    case "hub":if(mySubj().length<2){go("home");break}go("hub");break;
     case "home":case "errors":case "rewards":case "settings":case "plan":go(a);break;
-    case "subj":V.subj=el.dataset.s;S.lastSubj=V.subj;save();V.firstHome=true;render();break;
+    case "subj":V.subj=el.dataset.s;S.lastSubj=V.subj;save();V.firstHome=true;go("home");break;
     case "open":V.view="chapter";V.ch=el.dataset.ch;V.subj=CH[V.ch].subj;openTab(el.dataset.t||"studia");render();window.scrollTo(0,0);break;
     case "tab":{const y=window.scrollY;openTab(el.dataset.t);render();const ch=document.querySelector(".chead");const lim=ch?ch.offsetTop+ch.offsetHeight-60:0;window.scrollTo(0,Math.min(y,lim));break}
     case "blur":V.blur=!V.blur;render();break;
