@@ -52,13 +52,17 @@ ${appunti}`;
         generationConfig: { temperature: 0.4, maxOutputTokens: 1200 },
       }),
     });
-    if (r.status === 404) { lastErr = "model " + model; continue; }
     const d = await r.json().catch(() => ({}));
-    if (r.status === 429) return json({ error: "quota" }, 429);
-    if (!r.ok) return json({ error: "upstream", status: r.status, detail: d?.error?.message || "" }, 502);
+    if (r.status === 429) { console.error("gemini quota", model, JSON.stringify(d?.error || {}).slice(0, 400)); return json({ error: "quota" }, 429); }
+    if (!r.ok) {
+      console.error("gemini", model, r.status, JSON.stringify(d?.error || d).slice(0, 600));
+      if (r.status === 400 || r.status === 404) { lastErr = model + " " + r.status + " " + (d?.error?.message || ""); if (r.status === 404 || /not found|not supported/i.test(d?.error?.message || "")) continue; }
+      return json({ error: "upstream", status: r.status, detail: (d?.error?.message || "").slice(0, 300) }, 502);
+    }
     const text = (d?.candidates?.[0]?.content?.parts || []).map((p: { text?: string }) => p.text || "").join("").trim();
-    if (!text) return json({ error: "empty", reason: d?.candidates?.[0]?.finishReason || d?.promptFeedback?.blockReason || "" }, 502);
+    if (!text) { console.error("gemini empty", model, JSON.stringify(d).slice(0, 400)); return json({ error: "empty", reason: d?.candidates?.[0]?.finishReason || d?.promptFeedback?.blockReason || "" }, 502); }
     return json({ text, model });
   }
-  return json({ error: "nomodel", detail: lastErr }, 502);
+  console.error("gemini nomodel", lastErr);
+  return json({ error: "nomodel", detail: lastErr.slice(0, 300) }, 502);
 });

@@ -678,8 +678,8 @@ async function ask(q){
     if(!SB||!CL.user)throw{msg:"Accedi con il tuo account per usare il tutor."};
     const chap=V.view==="chapter"&&V.ch&&CH[V.ch]&&CH[V.ch].subj===sk?CH[V.ch]:null;
     const {data,error}=await SB.functions.invoke("tutor",{body:{materia:SUBJ[sk].name,capitolo:chap?chap.id+". "+chap.t:"",nome:S.name||"",appunti:appunti(sk),messages:ms.filter(m=>!m.err).slice(-12).map(m=>({role:m.role,text:m.text}))}});
-    if(error){let code="",st=0;try{st=error.context&&error.context.status;const j=await error.context.json();code=j.error}catch(e){}
-      throw{msg:code==="nokey"?"Il tutor non è ancora attivo: manca la chiave Gemini su Supabase (secret GEMINI_API_KEY).":code==="quota"||st===429?"Troppe domande in poco tempo: aspetta un minuto e riprova.":"Il tutor non risponde in questo momento. Riprova tra poco."}}
+    if(error){let code="",st=0,det="";try{st=error.context&&error.context.status;const j=await error.context.json();code=j.error;det=j.detail||""}catch(e){}console.warn("tutor",st,code,det);
+      throw{msg:code==="nokey"?"Il tutor non è ancora attivo: manca la chiave Gemini su Supabase (secret GEMINI_API_KEY).":code==="quota"||st===429?"Troppe domande in poco tempo: aspetta un minuto e riprova.":"Il tutor non risponde in questo momento. Riprova tra poco."+(det?" (Dettaglio: "+det+")":"")}}
     text=data&&data.text;if(!text)throw{msg:"Il tutor non ha dato una risposta. Prova a riformulare la domanda."};
   }catch(e){text=(e&&e.msg)||"Connessione non riuscita. Controlla la rete e riprova.";err=true}
   ms.push({role:"model",text,err});TU.busy=false;fabRender()}
