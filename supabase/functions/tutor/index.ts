@@ -10,7 +10,7 @@ const CORS = {
 const json = (o: unknown, status = 200) =>
   new Response(JSON.stringify(o), { status, headers: { ...CORS, "Content-Type": "application/json" } });
 
-const MODELS = (Deno.env.get("GEMINI_MODEL") || "gemini-flash-latest,gemini-2.5-flash").split(",").map((s) => s.trim());
+const MODELS = (Deno.env.get("GEMINI_MODEL") || "gemini-2.5-flash,gemini-flash-latest,gemini-2.5-flash-lite,gemini-flash-lite-latest").split(",").map((s) => s.trim());
 
 Deno.serve(async (req: Request) => {
   if (req.method === "OPTIONS") return new Response("ok", { headers: CORS });
@@ -41,28 +41,41 @@ ${capitolo ? `In questo momento sta guardando il capitolo: ${capitolo}.` : ""}
 APPUNTI DEL CORSO:
 ${appunti}`;
 
-  let lastErr = "";
-  for (const model of MODELS) {
-    const r = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json", "x-goog-api-key": key },
-      body: JSON.stringify({
-        systemInstruction: { parts: [{ text: system }] },
-        contents: msgs,
-        generationConfig: { temperature: 0.4, maxOutputTokens: 1200 },
-      }),
-    });
-    const d = await r.json().catch(() => ({}));
-    if (r.status === 429) { console.error("gemini quota", model, JSON.stringify(d?.error || {}).slice(0, 400)); return json({ error: "quota" }, 429); }
-    if (!r.ok) {
-      console.error("gemini", model, r.status, JSON.stringify(d?.error || d).slice(0, 600));
-      if (r.status === 400 || r.status === 404) { lastErr = model + " " + r.status + " " + (d?.error?.message || ""); if (r.status === 404 || /not found|not supported/i.test(d?.error?.message || "")) continue; }
-      return json({ error: "upstream", status: r.status, detail: (d?.error?.message || "").slice(0, 300) }, 502);
+  const call = (model: string) => fetch(`https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json", "x-goog-api-key": key },
+    body: JSON.stringify({
+      systemInstruction: { parts: [{ text: system }] },
+      contents: msgs,
+      generationConfig: { temperature: 0.4, maxOutputTokens: 1200 },
+    }),
+  });
+
+  // Prova i modelli in ordine; se uno è sovraccarico (503/500), senza quota (429) o non esiste (404) passa al successivo.
+  // Se falliscono tutti per sovraccarico, aspetta un attimo e ritenta una volta.
+  let lastErr = "", busy = 0, quota = 0;
+  for (let pass = 0; pass < 2; pass++) {
+    if (pass === 1) { if (!busy) break; await new Promise((r) => setTimeout(r, 2000)); }
+    for (const model of MODELS) {
+      let r: Response;
+      try { r = await call(model); } catch (e) { lastErr = model + " fetch " + String(e); busy++; continue; }
+      const d = await r.json().catch(() => ({}));
+      if (!r.ok) {
+        const msg = String(d?.error?.message || "");
+        console.error("gemini", model, r.status, msg.slice(0, 300));
+        lastErr = model + " " + r.status + " " + msg;
+        if (r.status === 503 || r.status === 500 || r.status === 504) { busy++; continue; }
+        if (r.status === 429) { quota++; continue; }
+        if (r.status === 404 || /not found|not supported/i.test(msg)) continue;
+        return json({ error: "upstream", status: r.status, detail: msg.slice(0, 300) }, 502);
+      }
+      const text = (d?.candidates?.[0]?.content?.parts || []).map((p: { text?: string }) => p.text || "").join("").trim();
+      if (!text) { console.error("gemini empty", model, JSON.stringify(d).slice(0, 400)); lastErr = model + " empty"; continue; }
+      return json({ text, model });
     }
-    const text = (d?.candidates?.[0]?.content?.parts || []).map((p: { text?: string }) => p.text || "").join("").trim();
-    if (!text) { console.error("gemini empty", model, JSON.stringify(d).slice(0, 400)); return json({ error: "empty", reason: d?.candidates?.[0]?.finishReason || d?.promptFeedback?.blockReason || "" }, 502); }
-    return json({ text, model });
   }
-  console.error("gemini nomodel", lastErr);
+  console.error("gemini all failed", lastErr);
+  if (busy) return json({ error: "busy", detail: "I server di Google sono sovraccarichi in questo momento." }, 503);
+  if (quota) return json({ error: "quota" }, 429);
   return json({ error: "nomodel", detail: lastErr.slice(0, 300) }, 502);
 });
