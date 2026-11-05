@@ -1,5 +1,5 @@
 /* Coltura – Dermatologia: flashcard, frasi, abbinamenti e domande in più per ogni capitolo */
-const AX={};
+var AX=AX||{};
 AX["de:1"]={
 fc:[
 ["Da quali strati è formata la cute?","Epidermide, derma, ipoderma e annessi (unità pilo-sebacea, ghiandole sudoripare, unghie)."],
