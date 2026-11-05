@@ -10,7 +10,12 @@ const CORS = {
 const json = (o: unknown, status = 200) =>
   new Response(JSON.stringify(o), { status, headers: { ...CORS, "Content-Type": "application/json" } });
 
-const MODELS = (Deno.env.get("GEMINI_MODEL") || "gemini-2.5-flash,gemini-flash-latest,gemini-2.5-flash-lite,gemini-flash-lite-latest").split(",").map((s) => s.trim());
+const MODELS = (Deno.env.get("GEMINI_MODEL") || "gemini-3.5-flash-lite,gemini-flash-lite-latest,gemini-3.8-flash,gemini-flash-latest").split(",").map((s) => s.trim());
+
+// modelli ritirati/inesistenti visti da questa istanza: non riprovarli
+const DEAD = new Set<string>();
+// modelli che non accettano thinkingConfig
+const NOTHINK = new Set<string>();
 
 Deno.serve(async (req: Request) => {
   if (req.method === "OPTIONS") return new Response("ok", { headers: CORS });
@@ -41,36 +46,42 @@ ${capitolo ? `In questo momento sta guardando il capitolo: ${capitolo}.` : ""}
 APPUNTI DEL CORSO:
 ${appunti}`;
 
-  const call = (model: string) => fetch(`https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json", "x-goog-api-key": key },
-    body: JSON.stringify({
-      systemInstruction: { parts: [{ text: system }] },
-      contents: msgs,
-      generationConfig: { temperature: 0.4, maxOutputTokens: 1200 },
-    }),
-  });
+  const call = (model: string) => {
+    const gc: Record<string, unknown> = { temperature: 0.4, maxOutputTokens: 1200 };
+    if (!NOTHINK.has(model)) gc.thinkingConfig = { thinkingLevel: "low" };
+    return fetch(`https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "x-goog-api-key": key },
+      body: JSON.stringify({ systemInstruction: { parts: [{ text: system }] }, contents: msgs, generationConfig: gc }),
+    });
+  };
 
   // Prova i modelli in ordine; se uno è sovraccarico (503/500), senza quota (429) o non esiste (404) passa al successivo.
   // Se falliscono tutti per sovraccarico, aspetta un attimo e ritenta una volta.
   let lastErr = "", busy = 0, quota = 0;
   for (let pass = 0; pass < 2; pass++) {
-    if (pass === 1) { if (!busy) break; await new Promise((r) => setTimeout(r, 2000)); }
+    if (pass === 1) { if (!busy) break; await new Promise((r) => setTimeout(r, 1500)); }
     for (const model of MODELS) {
+      if (DEAD.has(model)) continue;
       let r: Response;
       try { r = await call(model); } catch (e) { lastErr = model + " fetch " + String(e); busy++; continue; }
-      const d = await r.json().catch(() => ({}));
+      let d = await r.json().catch(() => ({}));
+      if (r.status === 400 && /thinking/i.test(String(d?.error?.message || "")) && !NOTHINK.has(model)) {
+        NOTHINK.add(model);
+        try { r = await call(model); d = await r.json().catch(() => ({})); } catch (e) { lastErr = model + " fetch " + String(e); busy++; continue; }
+      }
       if (!r.ok) {
         const msg = String(d?.error?.message || "");
         console.error("gemini", model, r.status, msg.slice(0, 300));
         lastErr = model + " " + r.status + " " + msg;
         if (r.status === 503 || r.status === 500 || r.status === 504) { busy++; continue; }
         if (r.status === 429) { quota++; continue; }
-        if (r.status === 404 || /not found|not supported/i.test(msg)) continue;
+        if (r.status === 404 || /not found|not supported|no longer available/i.test(msg)) { DEAD.add(model); continue; }
         return json({ error: "upstream", status: r.status, detail: msg.slice(0, 300) }, 502);
       }
       const text = (d?.candidates?.[0]?.content?.parts || []).map((p: { text?: string }) => p.text || "").join("").trim();
       if (!text) { console.error("gemini empty", model, JSON.stringify(d).slice(0, 400)); lastErr = model + " empty"; continue; }
+      console.log("tutor ok", model, pass);
       return json({ text, model });
     }
   }
