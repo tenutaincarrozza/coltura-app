@@ -324,7 +324,7 @@ function runnerView(){
     else{const t=norm(st.text||"");const hits=d[2].map(k=>t.includes(norm(k)));const n=hits.filter(Boolean).length;
       h+='<p class="muted" style="margin:0 0 6px">Parole chiave trovate: '+n+' su '+d[2].length+'</p><div class="kws">'+d[2].map((k,i)=>'<span class="kw'+(hits[i]?" hit":"")+'">'+esc(k)+'</span>').join("")+'</div><div class="model"><b style="font-family:var(--display)">Risposta modello</b><br>'+esc(d[1])+'</div>';
       h+=st.rated==null?'<p style="margin:16px 0 0;font-weight:600">Com’è andata?</p><div class="rate"><button data-a="rate" data-v="ko">Da rivedere</button><button data-a="rate" data-v="half">A metà</button><button data-a="rate" data-v="ok">La sapevo</button></div>':nextBtn()}}
-  else if(it.type==="f"){h+='<div class="flip"><div class="fc'+(st.flip?" on":"")+'" data-a="flip" tabindex="0" role="button" aria-label="Gira la carta"><div class="front"><p class="q">'+esc(d[0])+'</p><small>Tocca per girare</small></div><div class="back">'+esc(d[1])+'</div></div></div>';
+  else if(it.type==="f"){h+='<div class="flip"><div class="fc '+(st.flip?"is-back":"is-front")+(st.turnIn?" turn":"")+'" data-a="flip" tabindex="0" role="button" aria-label="'+(st.flip?"Torna alla domanda":"Gira la carta")+'">'+(st.flip?'<div class="face fc-back"><p class="fq">'+esc(d[0])+'</p><p class="fa">'+esc(d[1])+'</p><small>Tocca per tornare alla domanda</small></div>':'<div class="face fc-front"><p class="q">'+esc(d[0])+'</p><small>Tocca per girare</small></div>')+'</div></div>';
     if(st.flip)h+='<div class="rate" style="grid-template-columns:1fr 1fr"><button data-a="fcrate" data-v="ko">Da ripassare</button><button data-a="fcrate" data-v="ok">Lo sapevo</button></div>'}
   else if(it.type==="m"){h+='<p class="q">Abbina ogni voce alla sua coppia</p><div class="match"><div class="col">';
     d.forEach((p,k)=>{h+='<button class="mi'+(st.found[k]?" done":"")+(st.sel===k?" sel":"")+'" data-a="ml" data-k="'+k+'" '+(st.found[k]?"disabled":"")+'>'+esc(p[0])+'</button>'});
@@ -574,7 +574,10 @@ function act(a,el){
     case "gapskip":r.state.ans="";r.state.ok=false;done("ko");render();break;
     case "openshow":{const t=document.getElementById("openin");r.state.text=t?t.value:"";r.state.shown=true;render();break}
     case "rate":r.state.rated=el.dataset.v;done(el.dataset.v);render();break;
-    case "flip":r.state.flip=!r.state.flip;el.classList.toggle("on");if(r.state.flip&&!document.querySelector(".rate"))setTimeout(render,matchMedia("(prefers-reduced-motion: reduce)").matches?0:480);break;
+    case "flip":{if(r.state.turning)break;const rm=matchMedia("(prefers-reduced-motion: reduce)").matches;
+      const swap=()=>{r.state.flip=!r.state.flip;r.state.turnIn=!rm;render();r.state.turnIn=false;r.state.turning=false;
+        if(!rm)requestAnimationFrame(()=>requestAnimationFrame(()=>{const c=document.querySelector(".fc");if(c)c.classList.remove("turn")}))};
+      if(rm){swap();break}r.state.turning=true;el.classList.add("turn");setTimeout(swap,170);break}
     case "fcrate":done(el.dataset.v);r.i++;prepItem();render();break;
     case "ml":r.state.sel=+el.dataset.k;r.state.bad=null;render();break;
     case "mr":{const k=+el.dataset.k;if(r.state.sel==null){toast("Scegli prima una voce a sinistra");return}
@@ -632,7 +635,7 @@ const TU={menu:false,open:false,busy:false,msgs:{}};
 const HIDE=["run","orale"];
 
 function curSubj(){const l=mySubj();return l.includes(V.subj)?V.subj:l[0]}
-function fabVisible(){return !(SB&&(!CL.ready||!CL.user||CL.recovery))&&!(SB&&!((CL.profile&&CL.profile.subjects)||[]).length)&&!HIDE.includes(V.view)}
+function fabVisible(){return !(SB&&(!CL.ready||!CL.user||CL.recovery))&&!(SB&&!((CL.profile&&CL.profile.subjects)||[]).length)&&!HIDE.includes(V.view)&&!(V.view==="chapter"&&["flash","quiz","eserc","aperte"].includes(V.tab))}
 
 /* appunti della materia da passare al tutor: il capitolo aperto per primo, poi gli altri */
 function appunti(sk){
